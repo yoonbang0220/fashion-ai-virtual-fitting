@@ -58,14 +58,15 @@ async function callNanoBananaAPI(prompt, originalImageUrl = null) {
 
   // Gemini 3 모델 우선, 그 다음 이미지 생성 최적화 모델
   const models = [
-    'gemini-3-pro-image-preview',            // Gemini 3 프로 이미지 생성 (최우선)
-    'gemini-3-flash-preview',                // Gemini 3 플래시 (최우선)
-    'gemini-3-pro-preview',                  // Gemini 3 프로 (최우선)
+    'gemini-3.0-flash',                      // Gemini 3.0 플래시 (최우선!)
+    'gemini-3-pro-image-preview',            // Gemini 3 프로 이미지 생성
+    'gemini-3-flash-preview',                // Gemini 3 플래시
+    'gemini-3-pro-preview',                  // Gemini 3 프로
     'gemini-2.0-flash-exp-image-generation', // 이미지 생성 전용
     'gemini-2.5-flash-image',                // 이미지 생성 최적화
-    'nano-banana-pro-preview',               // 나노바나나
-    'gemini-2.5-flash',                      // 일반 텍스트 (Fallback)
-    'gemini-2.5-pro'                         // 일반 텍스트 프로 (Fallback)
+    'gemini-2.5-flash',                      // Gemini 2.5 플래시
+    'gemini-2.5-pro',                        // Gemini 2.5 프로
+    'nano-banana-pro-preview'                // 나노바나나 (Fallback)
   ];
 
   // Parts 배열 구성

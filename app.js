@@ -204,28 +204,58 @@ async function removeGarment(category, index) {
     // 슬롯 비우기
     appState.slots[category][index] = null;
     
-    // detectedGarments에서도 제거
-    if (appState.detectedGarments[category] && appState.detectedGarments[category][index]) {
-      appState.detectedGarments[category][index] = null;
-    }
+    // 모든 슬롯이 비어있는지 확인
+    const allEmpty = ['outer', 'inner', 'bottoms'].every(cat => 
+      appState.slots[cat].every(slot => !slot)
+    );
     
-    // basePersonImageUrl이 있으면 그것으로 복원, 없으면 composedImageUrl 유지
-    if (appState.basePersonImageUrl) {
-      console.log('[옷 벗기기] 원래 Base 사진으로 복원');
+    if (allEmpty) {
+      // 모든 슬롯이 비어있으면 base 이미지로 복원
+      console.log('[옷 벗기기] 모든 슬롯 비어있음, Base 이미지로 복원');
       appState.composedImageUrl = null;
+      appState.status = appState.basePersonImageUrl ? STATUS.READY : STATUS.EMPTY;
     } else {
-      console.log('[옷 벗기기] Base 이미지 없음, composed 이미지 유지');
-      // composedImageUrl을 유지하고 다른 슬롯들로 재생성해야 하지만,
-      // 일단은 그대로 둠 (나중에 개선 가능)
+      // 다른 슬롯에 옷이 있으면 base 이미지부터 다시 합성
+      console.log('[옷 벗기기] 다른 슬롯 유지, Base 이미지부터 재합성');
+      
+      if (!appState.basePersonImageUrl) {
+        throw new Error('Base 이미지가 없어서 재합성할 수 없습니다');
+      }
+      
+      // Base 이미지로 초기화
+      appState.composedImageUrl = null;
+      appState.status = STATUS.GENERATING;
+      
+      // UI 업데이트 (로딩 표시)
+      updateUI();
+      
+      // 모든 남은 슬롯의 옷들을 순서대로 합성
+      const remainingSlots = [];
+      for (const cat of ['outer', 'inner', 'bottoms']) {
+        for (let i = 0; i < appState.slots[cat].length; i++) {
+          if (appState.slots[cat][i]) {
+            remainingSlots.push({
+              category: cat,
+              index: i,
+              garmentImageUrl: appState.slots[cat][i]
+            });
+          }
+        }
+      }
+      
+      console.log(`[옷 벗기기] 재합성할 슬롯: ${remainingSlots.length}개`);
+      
+      // 첫 번째 슬롯부터 순서대로 합성
+      for (const slot of remainingSlots) {
+        console.log(`[옷 벗기기] ${slot.category}[${slot.index}] 합성 중...`);
+        await requestTryOn(slot);
+      }
     }
-    
-    // 상태 변경
-    appState.status = appState.composedImageUrl ? STATUS.DONE : STATUS.READY;
     
     // UI 업데이트
     updateUI();
     
-    // 상태 저장 (에러 무시)
+    // 상태 저장
     try {
       if (window.saveState) {
         const sessionId = window.getSessionId();
@@ -387,14 +417,15 @@ async function generateVirtualTryOn(params) {
   
   // 나노바나나 API 호출 (Gemini 3 모델 우선)
   const models = [
-    'gemini-3-pro-image-preview',            // Gemini 3 프로 이미지 생성 (최우선)
-    'gemini-3-flash-preview',                // Gemini 3 플래시 (최우선)
-    'gemini-3-pro-preview',                  // Gemini 3 프로 (최우선)
+    'gemini-3.0-flash',                      // Gemini 3.0 플래시 (최우선!)
+    'gemini-3-pro-image-preview',            // Gemini 3 프로 이미지 생성
+    'gemini-3-flash-preview',                // Gemini 3 플래시
+    'gemini-3-pro-preview',                  // Gemini 3 프로
     'gemini-2.0-flash-exp-image-generation', // 이미지 생성 전용
     'gemini-2.5-flash-image',                // 이미지 생성 최적화
-    'nano-banana-pro-preview',               // 나노바나나
-    'gemini-2.5-flash',                      // 일반 텍스트 (Fallback)
-    'gemini-2.5-pro'                         // 일반 텍스트 프로 (Fallback)
+    'gemini-2.5-flash',                      // Gemini 2.5 플래시
+    'gemini-2.5-pro',                        // Gemini 2.5 프로
+    'nano-banana-pro-preview'                // 나노바나나 (Fallback)
   ];
   
   for (const model of models) {

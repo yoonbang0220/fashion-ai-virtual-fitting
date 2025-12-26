@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Storage 초기화</title>
+  <style>
+    body {
+      font-family: 'Pretendard', -apple-system, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    .container {
+      background: white;
+      padding: 40px;
+      border-radius: 20px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+      text-align: center;
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 20px;
+    }
+    button {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 15px 30px;
+      font-size: 16px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.3s;
+      margin: 10px;
+    }
+    button:hover {
+      background: #764ba2;
+      transform: translateY(-2px);
+    }
+    button.danger {
+      background: #e74c3c;
+    }
+    button.danger:hover {
+      background: #c0392b;
+    }
+    .status {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 10px;
+      font-weight: bold;
+    }
+    .success {
+      background: #d4edda;
+      color: #155724;
+    }
+    .info {
+      background: #d1ecf1;
+      color: #0c5460;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔄 Fashion AI Storage 초기화</h1>
+    <p>저장된 모든 데이터(메인 사진, 슬롯 이미지)를 삭제합니다.</p>
+    
+    <button class="danger" onclick="resetStorage()">
+      🗑️ 초기화 실행
+    </button>
+    
+    <button onclick="goToApp()">
+      🏠 앱으로 돌아가기
+    </button>
+    
+    <div id="status"></div>
+  </div>
+
+  <script>
+    function resetStorage() {
+      try {
+        // 세션 ID 가져오기
+        const sessionId = localStorage.getItem('fashionAI_sessionId');
+        
+        if (sessionId) {
+          // 저장된 상태 삭제
+          localStorage.removeItem(`fashionAI_${sessionId}`);
+          localStorage.removeItem('fashionAI_sessionId');
+          
+          showStatus('✅ Local Storage가 성공적으로 초기화되었습니다!', 'success');
+          
+          // 2초 후 앱으로 리다이렉트
+          setTimeout(() => {
+            window.location.href = './index.html';
+          }, 2000);
+        } else {
+          showStatus('ℹ️ 저장된 데이터가 없습니다.', 'info');
+        }
+      } catch (error) {
+        showStatus('❌ 오류 발생: ' + error.message, 'danger');
+      }
+    }
+    
+    function goToApp() {
+      window.location.href = './index.html';
+    }
+    
+    function showStatus(message, type) {
+      const statusDiv = document.getElementById('status');
+      statusDiv.textContent = message;
+      statusDiv.className = 'status ' + type;
+    }
+  </script>
+</body>
+</html>
+

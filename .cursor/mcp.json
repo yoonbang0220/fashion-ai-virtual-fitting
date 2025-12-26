@@ -1,0 +1,63 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@executeautomation/playwright-mcp-server"
+      ]
+    },
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ]
+    },
+    "supabase": {
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "npx -y @modelcontextprotocol/server-postgres $env:SUPABASE_CONNECTION_STRING"
+      ]
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@browsermcp/mcp"
+      ]
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "C:/Users/yoonbang/Desktop/fashionAI"
+      ]
+    },
+    "github": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ]
+    },
+    "sequential-thinking-tools": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "task-master-ai": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "task-master-ai",
+        "--stdio"
+      ]
+    }
+  }
+}

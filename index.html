@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fashion AI - 가상 피팅</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Arimo:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Arimo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #ffffff;
+      color: #0a0a0a;
+      overflow-x: hidden;
+    }
+
+    /* Global Navigation Bar */
+    .global-nav {
+      background: #ffffff;
+      border-bottom: 1px solid #f3f4f6;
+      padding: 14px 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .global-nav .container {
+      max-width: 377px;
+      margin: 0 auto;
+      display: flex;
+      gap: 15px;
+    }
+
+    .nav-button {
+      font-family: 'Arimo', sans-serif;
+      font-size: 14px;
+      font-weight: 400;
+      line-height: 20px;
+      color: #99a1af;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .nav-button.active {
+      color: #000000;
+    }
+
+    /* App Container */
+    .app-container {
+      max-width: 377px;
+      margin: 0 auto;
+      background: #ffffff;
+      min-height: 100vh;
+    }
+
+    .content-container {
+      padding: 24px 16px;
+    }
+
+    /* Main Canvas */
+    .main-canvas {
+      background: #f9fafb;
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 24px;
+      min-height: 460px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    .main-canvas.has-image {
+      padding: 0;
+    }
+
+    .main-canvas img {
+      width: 100%;
+      height: auto;
+      border-radius: 16px;
+      display: block;
+    }
+
+    .upload-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .upload-icon-circle {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    
+    .upload-icon-circle::before {
+      content: '';
+      width: 32px;
+      height: 32px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%234a5565' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpolyline points='17 8 12 3 7 8'/%3E%3Cline x1='12' y1='3' x2='12' y2='15'/%3E%3C/svg%3E");
+      background-size: contain;
+      background-repeat: no-repeat;
+      background-position: center;
+    }
+
+    .upload-text {
+      font-family: 'Arimo', sans-serif;
+      font-size: 16px;
+      font-weight: 400;
+      line-height: 24px;
+      color: #4a5565;
+      text-align: center;
+    }
+
+    .prompt-button {
+      position: absolute;
+      bottom: 24px;
+      right: 24px;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 9px 20px;
+      font-family: 'Arimo', sans-serif;
+      font-size: 14px;
+      font-weight: 400;
+      line-height: 20px;
+      color: #0a0a0a;
+      cursor: pointer;
+    }
+
+    .prompt-button:hover {
+      background: #f9fafb;
+    }
+
+    /* Fitting Control Deck */
+    .fitting-control-deck {
+      margin-bottom: 32px;
+    }
+
+    .control-buttons-container {
+      display: flex;
+      gap: 24px;
+      flex-wrap: nowrap;
+      width: 100%;
+      max-width: 800px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 20px;
+      cursor: grab;
+      -webkit-overflow-scrolling: touch;
+      user-select: none;
+    }
+
+    .control-buttons-container:active {
+      cursor: grabbing;
+    }
+
+    .control-buttons-container::-webkit-scrollbar {
+      display: none;
+    }
+
+    .control-buttons-container {
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+    
+    /* 드래그 방해 요소 제거 */
+    .control-section * {
+      pointer-events: none;
+    }
+    
+    .control-section .slot-button {
+      pointer-events: auto;
+    }
+    
+    /* X 버튼은 반드시 클릭 가능하게 */
+    .control-section .slot-button .remove-btn {
+      pointer-events: auto !important;
+    }
+
+    .control-section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    .control-heading {
+      font-family: 'Arimo', sans-serif;
+      font-size: 14px;
+      font-weight: 400;
+      line-height: 20px;
+      color: #6a7282;
+      white-space: nowrap;
+      flex-shrink: 0;
+      margin: 0;
+    }
+
+    .control-buttons {
+      display: flex;
+      gap: 12px;
+      flex-wrap: nowrap !important;
+      flex-shrink: 0;
+    }
+
+    .slot-button {
+      width: 64px;
+      height: 64px;
+      min-width: 64px !important;
+      max-width: 64px !important;
+      flex-shrink: 0 !important;
+      flex-grow: 0 !important;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 14px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .slot-button:hover {
+      border-color: #cbd5e1;
+    }
+
+    .slot-button img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 14px;
+      pointer-events: none; /* 이미지는 클릭 차단, 슬롯만 클릭 가능 */
+    }
+
+    .slot-button.empty::after {
+      content: '+';
+      font-size: 24px;
+      color: #cbd5e1;
+    }
+
+    /* X 버튼 (옷 제거용) */
+    .slot-button .remove-btn {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 24px; /* 더 크게 */
+      height: 24px; /* 더 크게 */
+      background: rgba(239, 68, 68, 0.9); /* 더 눈에 띄게 */
+      border: 2px solid white; /* 흰 테두리 */
+      border-radius: 50%;
+      color: white;
+      font-size: 14px;
+      font-weight: bold;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.2s, transform 0.2s;
+      z-index: 10000; /* 매우 높은 z-index */
+      pointer-events: all !important; /* 강제로 활성화 */
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3); /* 그림자 추가 */
+    }
+
+    .slot-button:hover .remove-btn {
+      opacity: 1;
+    }
+
+    .slot-button .remove-btn:hover {
+      background: rgba(220, 38, 38, 1);
+      transform: scale(1.2); /* 더 크게 */
+    }
+
+    .slot-button .remove-btn:active {
+      transform: scale(1.0);
+      background: rgba(185, 28, 28, 1);
+    }
+
+    /* Content Feeds */
+    .content-feeds {
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+    }
+
+    .feed-section {
+      margin-bottom: 32px;
+    }
+
+    .feed-heading {
+      font-family: 'Arimo', sans-serif;
+      font-size: 18px;
+      font-weight: 400;
+      line-height: 28px;
+      color: #0a0a0a;
+      margin-bottom: 4px;
+    }
+
+    .feed-subheading {
+      font-family: 'Arimo', sans-serif;
+      font-size: 14px;
+      font-weight: 400;
+      line-height: 20px;
+      color: #6a7282;
+      margin-bottom: 16px;
+    }
+
+    .product-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    
+    @media (min-width: 768px) {
+      .product-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+
+    .product-card {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .product-image {
+      width: 100%;
+      aspect-ratio: 1;
+      background: #f9fafb;
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .product-image img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .product-info {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .product-brand {
+      font-family: 'Arimo', sans-serif;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 16px;
+      color: #6a7282;
+    }
+
+    .product-name {
+      font-family: 'Arimo', sans-serif;
+      font-size: 14px;
+      font-weight: 400;
+      line-height: 20px;
+      color: #0a0a0a;
+    }
+
+    .product-price {
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+    }
+
+    .product-discount {
+      font-family: 'Arimo', sans-serif;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 16px;
+      color: #e7000b;
+    }
+
+    .product-price-value {
+      font-family: 'Arimo', sans-serif;
+      font-size: 14px;
+      font-weight: 400;
+      line-height: 20px;
+      color: #0a0a0a;
+    }
+
+    /* Loading Overlay */
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+
+    .loading-overlay.active {
+      display: flex;
+    }
+
+    .loading-content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .loading-spinner {
+      width: 50px;
+      height: 50px;
+      border: 5px solid rgba(255, 255, 255, 0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading-text {
+      color: white;
+      font-family: 'Arimo', sans-serif;
+      font-size: 16px;
+      font-weight: 400;
+    }
+
+    /* Error Banner */
+    .error-banner {
+      background: #ff4444;
+      color: white;
+      padding: 15px;
+      margin: 16px;
+      border-radius: 10px;
+      display: none;
+      font-family: 'Arimo', sans-serif;
+    }
+
+    .error-banner.active {
+      display: block;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    /* Status Text */
+    .status-text {
+      position: absolute;
+      bottom: 60px;
+      left: 24px;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-family: 'Arimo', sans-serif;
+      font-size: 12px;
+      display: none;
+    }
+
+    .status-text.visible {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- Global Navigation Bar -->
+  <nav class="global-nav">
+    <div class="container">
+      <button class="nav-button">메인</button>
+      <button class="nav-button">랭킹</button>
+      <button class="nav-button">세일</button>
+      <button class="nav-button">브랜드</button>
+      <button class="nav-button">소셜</button>
+      <button class="nav-button active">AI 스타일리스트</button>
+    </div>
+  </nav>
+
+  <!-- Error Banner -->
+  <div class="error-banner" id="errorBanner"></div>
+
+  <!-- App Container -->
+  <div class="app-container">
+    <div class="content-container">
+      <!-- Main Canvas -->
+      <div class="main-canvas" id="mainCanvas">
+        <div class="upload-placeholder" id="uploadPlaceholder">
+          <div class="upload-icon-circle"></div>
+          <div class="upload-text">회원님의 사진을 등록해주세요</div>
+        </div>
+        <img id="mainCanvasImage" style="display: none;" alt="Main image">
+        <div class="status-text" id="statusText"></div>
+        <button class="prompt-button" id="promptButton">prompt</button>
+        <input type="file" id="photoInput" accept="image/*">
+      </div>
+
+      <!-- Fitting Control Deck -->
+      <div class="fitting-control-deck">
+        <div class="control-buttons-container">
+          <div class="control-section">
+            <div class="control-heading">Outer</div>
+            <div class="control-buttons" id="outerSlots">
+              <div class="slot-button empty" data-category="outer" data-index="0"></div>
+              <div class="slot-button empty" data-category="outer" data-index="1"></div>
+            </div>
+          </div>
+          <div class="control-section">
+            <div class="control-heading">Inner</div>
+            <div class="control-buttons" id="innerSlots">
+              <div class="slot-button empty" data-category="inner" data-index="0"></div>
+              <div class="slot-button empty" data-category="inner" data-index="1"></div>
+              <div class="slot-button empty" data-category="inner" data-index="2"></div>
+            </div>
+          </div>
+          <div class="control-section">
+            <div class="control-heading">Bottoms</div>
+            <div class="control-buttons" id="bottomsSlots">
+              <div class="slot-button empty" data-category="bottoms" data-index="0"></div>
+              <div class="slot-button empty" data-category="bottoms" data-index="1"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Content Feeds -->
+      <div class="content-feeds" id="contentFeeds">
+        <!-- 이런 옷은 어떠실까요? -->
+        <div class="feed-section">
+          <div class="feed-heading">이런 옷은 어떠실까요?</div>
+          <div class="feed-subheading">회원님께 추천하는 스타일</div>
+          <div class="product-grid">
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">Essentials</div>
+                <div class="product-name">베이직 블랙 티셔츠</div>
+                <div class="product-price">
+                  <span class="product-discount">15%</span>
+                  <span class="product-price-value">29,000원</span>
+                </div>
+              </div>
+            </div>
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">Urban</div>
+                <div class="product-name">화이트 옥스포드 셔츠</div>
+                <div class="product-price">
+                  <span class="product-price-value">59,000원</span>
+                </div>
+              </div>
+            </div>
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">Levi's</div>
+                <div class="product-name">클래식 블루 데님 진</div>
+                <div class="product-price">
+                  <span class="product-discount">20%</span>
+                  <span class="product-price-value">89,000원</span>
+                </div>
+              </div>
+            </div>
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">Champion</div>
+                <div class="product-name">오버핏 후드 티셔츠</div>
+                <div class="product-price">
+                  <span class="product-price-value">79,000원</span>
+                </div>
+              </div>
+            </div>
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">Zara</div>
+                <div class="product-name">베이직 블레이저 자켓</div>
+                <div class="product-price">
+                  <span class="product-price-value">129,000원</span>
+                </div>
+              </div>
+            </div>
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">Nike</div>
+                <div class="product-name">에어포스 1 스니커즈</div>
+                <div class="product-price">
+                  <span class="product-discount">10%</span>
+                  <span class="product-price-value">149,000원</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- OOTD 의상 추천 -->
+        <div class="feed-section">
+          <div class="feed-heading">OOTD 의상 추천</div>
+          <div class="feed-subheading">가가님들의 추천</div>
+          <div class="product-grid">
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">Carhartt</div>
+                <div class="product-name">캐주얼 후드 집업</div>
+                <div class="product-price">
+                  <span class="product-price-value">99,000원</span>
+                </div>
+              </div>
+            </div>
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">The North Face</div>
+                <div class="product-name">윈터 패딩 자켓</div>
+                <div class="product-price">
+                  <span class="product-discount">25%</span>
+                  <span class="product-price-value">299,000원</span>
+                </div>
+              </div>
+            </div>
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">Diesel</div>
+                <div class="product-name">슬림핏 데님 팬츠</div>
+                <div class="product-price">
+                  <span class="product-price-value">119,000원</span>
+                </div>
+              </div>
+            </div>
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">Uniqlo</div>
+                <div class="product-name">에어리즘 코튼 티</div>
+                <div class="product-price">
+                  <span class="product-price-value">19,900원</span>
+                </div>
+              </div>
+            </div>
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">Muji</div>
+                <div class="product-name">린넨 블렌드 셔츠</div>
+                <div class="product-price">
+                  <span class="product-price-value">39,000원</span>
+                </div>
+              </div>
+            </div>
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">Adidas</div>
+                <div class="product-name">스탠스미스 화이트</div>
+                <div class="product-price">
+                  <span class="product-discount">15%</span>
+                  <span class="product-price-value">129,000원</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 지금 인기있는 의상 -->
+        <div class="feed-section">
+          <div class="feed-heading">지금 인기있는 의상</div>
+          <div class="product-grid">
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">Acne Studios</div>
+                <div class="product-name">울 블렌드 코트</div>
+                <div class="product-price">
+                  <span class="product-discount">30%</span>
+                  <span class="product-price-value">899,000원</span>
+                </div>
+              </div>
+            </div>
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">Supreme</div>
+                <div class="product-name">박스로고 후드</div>
+                <div class="product-price">
+                  <span class="product-price-value">219,000원</span>
+                </div>
+              </div>
+            </div>
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">New Balance</div>
+                <div class="product-name">990v6 그레이</div>
+                <div class="product-price">
+                  <span class="product-discount">20%</span>
+                  <span class="product-price-value">259,000원</span>
+                </div>
+              </div>
+            </div>
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">A.P.C.</div>
+                <div class="product-name">로 스탠다드 데님</div>
+                <div class="product-price">
+                  <span class="product-price-value">189,000원</span>
+                </div>
+              </div>
+            </div>
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">Jil Sander</div>
+                <div class="product-name">미니멀 코튼 티</div>
+                <div class="product-price">
+                  <span class="product-price-value">159,000원</span>
+                </div>
+              </div>
+            </div>
+            <div class="product-card">
+              <div class="product-image"></div>
+              <div class="product-info">
+                <div class="product-brand">Lemaire</div>
+                <div class="product-name">오버사이즈 셔츠</div>
+                <div class="product-price">
+                  <span class="product-discount">10%</span>
+                  <span class="product-price-value">329,000원</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-content">
+      <div class="loading-spinner"></div>
+      <div class="loading-text" id="loadingText">처리 중...</div>
+    </div>
+  </div>
+
+  <!-- Supabase Client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- API Keys -->
+  <script>
+    // API 키는 절대 GitHub에 업로드하지 마세요!
+    // 실제 사용 시에는 여기에 직접 입력하거나 환경 변수를 사용하세요
+    window.GEMINI_API_KEY = 'YOUR_GEMINI_API_KEY_HERE';
+    window.OPENAI_API_KEY = 'YOUR_OPENAI_API_KEY_HERE';
+    window.SUPABASE_URL = 'YOUR_SUPABASE_URL_HERE';
+    window.SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY_HERE';
+  </script>
+
+  <!-- Modules -->
+  <script type="module" src="api/image-generation.js"></script>
+  <script type="module" src="api/detect-garments.js"></script>
+  <script type="module" src="api/supabase-config.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

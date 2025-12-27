@@ -38,6 +38,38 @@ function transitionTo(newStatus, errorMessage = null) {
 }
 
 /**
+ * 전체 상태 초기화
+ */
+function resetAllState() {
+  try {
+    console.log('[전체 초기화] 시작...');
+    
+    // 상태 완전 초기화
+    appState.status = STATUS.EMPTY;
+    appState.basePersonImageUrl = null;
+    appState.composedImageUrl = null;
+    appState.slots = {
+      outer: [null, null],
+      inner: [null, null, null],
+      bottoms: [null, null]
+    };
+    appState.detectedGarments = null;
+    appState.prompt = '';
+    appState.errorMessage = null;
+    
+    console.log('[전체 초기화] 완료');
+    
+    // UI 업데이트
+    updateUI();
+    
+    // 상태 저장
+    saveAppState();
+  } catch (error) {
+    console.error('[전체 초기화] 실패:', error);
+  }
+}
+
+/**
  * 사진 업로드 처리
  */
 async function handlePhotoUpload(file) {
@@ -685,6 +717,37 @@ function updateMainCanvas(baseImage, composedImage, status) {
         }
       }
     };
+    
+    // 🆕 메인 캔버스 X 버튼 추가
+    let removeMainBtn = mainCanvas.querySelector('.remove-main-btn');
+    if (!removeMainBtn) {
+      removeMainBtn = document.createElement('button');
+      removeMainBtn.className = 'remove-main-btn';
+      removeMainBtn.innerHTML = '×';
+      removeMainBtn.title = '전체 초기화';
+      removeMainBtn.type = 'button';
+      mainCanvas.appendChild(removeMainBtn);
+    }
+    
+    // X 버튼 클릭 이벤트
+    removeMainBtn.onclick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      console.log('[메인 캔버스] X 버튼 클릭 - 전체 초기화');
+      
+      const confirmed = confirm('모든 데이터를 초기화하시겠습니까?\n(메인 사진과 모든 의상이 제거됩니다)');
+      
+      if (confirmed) {
+        resetAllState();
+      }
+      return false;
+    };
+  } else {
+    // 이미지가 없을 때 X 버튼 제거
+    const removeMainBtn = mainCanvas?.querySelector('.remove-main-btn');
+    if (removeMainBtn) {
+      removeMainBtn.remove();
+    }
   }
 }
 

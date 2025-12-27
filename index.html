@@ -769,17 +769,7 @@
   <!-- Supabase Client -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <!-- API Keys -->
-  <script>
-    // API 키는 절대 GitHub에 업로드하지 마세요!
-    // 실제 사용 시에는 여기에 직접 입력하거나 환경 변수를 사용하세요
-    window.GEMINI_API_KEY = 'YOUR_GEMINI_API_KEY_HERE';
-    window.OPENAI_API_KEY = 'YOUR_OPENAI_API_KEY_HERE';
-    window.SUPABASE_URL = 'YOUR_SUPABASE_URL_HERE';
-    window.SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY_HERE';
-  </script>
-
-  <!-- Local API Key Config (ignored by Git) -->
+  <!-- API Keys: config.js 파일에서 로드 (Git에서 제외됨) -->
   <script src="config.js"></script>
 
   <!-- Modules -->

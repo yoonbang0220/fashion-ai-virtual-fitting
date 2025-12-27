@@ -703,6 +703,8 @@ function updateMainCanvas(baseImage, composedImage, status) {
     mainCanvasImage.src = imageToShow;
     mainCanvasImage.style.display = 'block';
     
+    console.log('🖼️ [X 버튼] mainCanvas 확인:', !!mainCanvas);
+    
     // 🆕 메인 이미지 클릭 이벤트 등록 (이미지가 표시될 때마다)
     mainCanvasImage.style.cursor = 'pointer';
     mainCanvasImage.onclick = () => {
@@ -719,34 +721,44 @@ function updateMainCanvas(baseImage, composedImage, status) {
     };
     
     // 🆕 메인 캔버스 X 버튼 추가
-    let removeMainBtn = mainCanvas.querySelector('.remove-main-btn');
-    if (!removeMainBtn) {
-      removeMainBtn = document.createElement('button');
-      removeMainBtn.className = 'remove-main-btn';
-      removeMainBtn.innerHTML = '×';
-      removeMainBtn.title = '전체 초기화';
-      removeMainBtn.type = 'button';
-      mainCanvas.appendChild(removeMainBtn);
-    }
-    
-    // X 버튼 클릭 이벤트
-    removeMainBtn.onclick = (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      console.log('[메인 캔버스] X 버튼 클릭 - 전체 초기화');
+    if (mainCanvas) {
+      let removeMainBtn = mainCanvas.querySelector('.remove-main-btn');
+      console.log('🖼️ [X 버튼] 기존 버튼 존재:', !!removeMainBtn);
       
-      const confirmed = confirm('모든 데이터를 초기화하시겠습니까?\n(메인 사진과 모든 의상이 제거됩니다)');
-      
-      if (confirmed) {
-        resetAllState();
+      if (!removeMainBtn) {
+        removeMainBtn = document.createElement('button');
+        removeMainBtn.className = 'remove-main-btn';
+        removeMainBtn.innerHTML = '×';
+        removeMainBtn.title = '전체 초기화';
+        removeMainBtn.type = 'button';
+        mainCanvas.appendChild(removeMainBtn);
+        console.log('🖼️ [X 버튼] 새 버튼 생성 완료');
       }
-      return false;
-    };
+      
+      // X 버튼 클릭 이벤트
+      removeMainBtn.onclick = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        console.log('[메인 캔버스] X 버튼 클릭 - 전체 초기화');
+        
+        const confirmed = confirm('모든 데이터를 초기화하시겠습니까?\n(메인 사진과 모든 의상이 제거됩니다)');
+        
+        if (confirmed) {
+          resetAllState();
+        }
+        return false;
+      };
+      
+      console.log('🖼️ [X 버튼] 이벤트 등록 완료');
+    } else {
+      console.warn('🖼️ [X 버튼] ⚠️ mainCanvas가 null입니다!');
+    }
   } else {
     // 이미지가 없을 때 X 버튼 제거
     const removeMainBtn = mainCanvas?.querySelector('.remove-main-btn');
     if (removeMainBtn) {
       removeMainBtn.remove();
+      console.log('🖼️ [X 버튼] 제거 완료');
     }
   }
 }

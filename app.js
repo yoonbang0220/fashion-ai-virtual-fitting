@@ -118,14 +118,16 @@ async function startAutoDetection(imageUrl) {
  * 더미 자동 감지 (AI 썸네일 생성)
  */
 async function mockAutoDetection(imageUrl) {
-  await runInlinePipeline(imageUrl);
+  await runInlinePipeline(imageUrl, appState.slots);
 }
 
 /**
- * 인라인 파이프라인 실행 (AI 썸네일 생성)
+ * 인라인 파이프라인 실행 (AI 썸네일 생성 + 자동 합성)
  */
-async function runInlinePipeline(imageUrl) {
+async function runInlinePipeline(imageUrl, slots = null) {
   try {
+    console.log('[파이프라인] 시작, imageUrl:', imageUrl ? '있음' : '없음');
+    
     // 더미 감지 데이터
     const detectedGarments = {
       outer: [{ confidence: 0.9 }],
@@ -135,24 +137,28 @@ async function runInlinePipeline(imageUrl) {
     
     appState.detectedGarments = detectedGarments;
     
-    // 각 카테고리별로 썸네일 생성
-    const categories = [
-      { type: 'outer', index: 0 },
-      { type: 'inner', index: 0 },
-      { type: 'bottoms', index: 0 }
-    ];
-    
-    for (const { type, index } of categories) {
-      try {
-        console.log(`[파이프라인] ${type}[${index}] 썸네일 생성 시작...`);
-        const thumbnailUrl = await window.generateGarmentThumbnail(type, 'default', imageUrl);
-        
-        if (thumbnailUrl) {
-          appState.slots[type][index] = thumbnailUrl;
-          console.log(`[파이프라인] ${type}[${index}] 썸네일 생성 완료`);
+    // 슬롯이 제공되지 않았으면 각 카테고리별로 썸네일 생성
+    if (!slots || !slots.outer.some(s => s) && !slots.inner.some(s => s) && !slots.bottoms.some(s => s)) {
+      console.log('[파이프라인] 썸네일 자동 생성 시작...');
+      
+      const categories = [
+        { type: 'outer', index: 0 },
+        { type: 'inner', index: 0 },
+        { type: 'bottoms', index: 0 }
+      ];
+      
+      for (const { type, index } of categories) {
+        try {
+          console.log(`[파이프라인] ${type}[${index}] 썸네일 생성 시작...`);
+          const thumbnailUrl = await window.generateGarmentThumbnail(type, 'default', imageUrl);
+          
+          if (thumbnailUrl) {
+            appState.slots[type][index] = thumbnailUrl;
+            console.log(`[파이프라인] ${type}[${index}] 썸네일 생성 완료`);
+          }
+        } catch (error) {
+          console.error(`[파이프라인] ${type}[${index}] 썸네일 생성 실패:`, error);
         }
-      } catch (error) {
-        console.error(`[파이프라인] ${type}[${index}] 썸네일 생성 실패:`, error);
       }
     }
     
@@ -240,37 +246,34 @@ async function replaceSlot(category, index, garmentImageUrl) {
 }
 
 /**
- * 슬롯의 의상 제거 (옷 벗기기)
+ * 슬롯의 의상 제거 (옷 벗기기) - 레이어 재합성
  */
 async function removeGarment(category, index) {
   try {
     console.log(`[옷 벗기기] 시작: ${category}[${index}]`);
     
-    // 슬롯 비우기
+    // 해당 슬롯만 비움
     appState.slots[category][index] = null;
     
-    // detectedGarments에서도 제거
-    if (appState.detectedGarments[category] && appState.detectedGarments[category][index]) {
-      appState.detectedGarments[category][index] = null;
-    }
+    // 모든 슬롯이 비어있는지 확인
+    const allSlotsEmpty = ['outer', 'inner', 'bottoms'].every(cat =>
+      appState.slots[cat].every(slot => !slot)
+    );
     
-    // basePersonImageUrl이 있으면 그것으로 복원, 없으면 composedImageUrl 유지
-    if (appState.basePersonImageUrl) {
-      console.log('[옷 벗기기] 원래 Base 사진으로 복원');
+    if (allSlotsEmpty) {
+      // 모든 슬롯이 비어있으면 base 이미지로 복원
+      console.log('[옷 벗기기] 모든 슬롯 비어있음, Base 이미지로 복원');
       appState.composedImageUrl = null;
+      appState.status = STATUS.READY;
     } else {
-      console.log('[옷 벗기기] Base 이미지 없음, composed 이미지 유지');
-      // composedImageUrl을 유지하고 다른 슬롯들로 재생성해야 하지만,
-      // 일단은 그대로 둠 (나중에 개선 가능)
+      // 다른 슬롯에 옷이 남아있으면, Base 이미지부터 다시 시작해서 남은 옷들을 순서대로 재합성
+      console.log('[옷 벗기기] 다른 슬롯 유지, Base 이미지부터 재합성 시작');
+      transitionTo(STATUS.GENERATING);
+      await requestTryOn({ category, index }); // 재합성
     }
     
-    // 상태 변경
-    appState.status = appState.composedImageUrl ? STATUS.DONE : STATUS.READY;
-    
-    // UI 업데이트
     updateUI();
     
-    // 상태 저장 (에러 무시)
     try {
       if (window.saveState) {
         const sessionId = window.getSessionId();
@@ -288,37 +291,27 @@ async function removeGarment(category, index) {
 }
 
 /**
- * 가상 피팅 요청
+ * 가상 피팅 요청 - Base 이미지부터 모든 레이어를 순서대로 합성
  */
 async function requestTryOn(changedSlot) {
   try {
-    // 현재 메인 사진 결정: 합성 이미지 또는 Base 이미지 (둘 중 하나는 있어야 함)
-    const currentMainImage = appState.composedImageUrl || appState.basePersonImageUrl;
+    console.log('[가상 피팅] 요청 시작 - Base 이미지부터 전체 레이어 재합성');
     
-    if (!currentMainImage) {
-      throw new Error('Base image is required');
+    // ⚠️ 중요: Base 이미지부터 시작 (composedImage 사용 안 함)
+    if (!appState.basePersonImageUrl) {
+      throw new Error('Base 이미지가 필요합니다');
     }
     
-    console.log('[가상 피팅] 현재 메인 사진:', appState.composedImageUrl ? '합성 이미지' : 'Base 이미지');
+    console.log('[가상 피팅] Base 이미지 사용:', appState.basePersonImageUrl.substring(0, 50));
+    console.log('[가상 피팅] 현재 슬롯 상태:', {
+      outer: appState.slots.outer.map((s, i) => s ? `[${i}]:있음` : `[${i}]:없음`),
+      inner: appState.slots.inner.map((s, i) => s ? `[${i}]:있음` : `[${i}]:없음`),
+      bottoms: appState.slots.bottoms.map((s, i) => s ? `[${i}]:있음` : `[${i}]:없음`)
+    });
     
-    // 변경된 슬롯의 의상 이미지 가져오기
-    if (!changedSlot || !changedSlot.category || changedSlot.index === undefined) {
-      throw new Error('변경된 슬롯 정보가 필요합니다');
-    }
-    
-    const changedCategory = changedSlot.category;
-    const changedIndex = changedSlot.index;
-    const changedGarmentUrl = appState.slots[changedCategory]?.[changedIndex];
-    
-    if (!changedGarmentUrl) {
-      throw new Error(`변경된 슬롯 ${changedCategory}[${changedIndex}]에 의상 이미지가 없습니다`);
-    }
-    
-    console.log(`[가상 피팅] ${changedCategory}[${changedIndex}] 의상 교체 시작...`);
-    
-    // 변경된 슬롯만 처리
+    // 전체 레이어 합성
     const result = await mockTryOn({
-      basePersonImageUrl: currentMainImage, // 현재 메인 사진 사용
+      basePersonImageUrl: appState.basePersonImageUrl, // Base 이미지 사용
       slots: {
         outer: appState.slots.outer.map(s => typeof s === 'string' ? s : (s?.url || null)),
         inner: appState.slots.inner.map(s => typeof s === 'string' ? s : (s?.url || null)),
@@ -330,6 +323,7 @@ async function requestTryOn(changedSlot) {
     
     // 합성 결과 업데이트
     appState.composedImageUrl = result.resultImageUrl;
+    console.log('[가상 피팅] 합성 완료!');
     
     // 상태 전이: GENERATING → DONE
     transitionTo(STATUS.DONE);
@@ -350,7 +344,7 @@ async function mockTryOn(params) {
 }
 
 /**
- * 가상 피팅 생성 (나노바나나 API 사용)
+ * 가상 피팅 생성 (나노바나나 API 사용) - 레이어 순서대로 합성
  */
 async function generateVirtualTryOn(params) {
   const apiKey = window.GEMINI_API_KEY;
@@ -358,73 +352,84 @@ async function generateVirtualTryOn(params) {
     throw new Error('GEMINI_API_KEY not set');
   }
   
-  // 변경된 슬롯 정보 확인
-  const changedCategory = params.changedSlot?.category;
-  const changedIndex = params.changedSlot?.index;
+  console.log('[가상 피팅] 레이어 순서 합성 시작...');
+  console.log('[가상 피팅] 현재 슬롯 상태:', params.slots);
   
-  if (!changedCategory || changedIndex === undefined) {
-    throw new Error('변경된 슬롯 정보가 필요합니다');
+  // 🎨 레이어 순서 정의 (입는 순서)
+  const layerOrder = [
+    { category: 'bottoms', index: 0, name: '하의 레이어 1' },
+    { category: 'bottoms', index: 1, name: '하의 레이어 2' },
+    { category: 'inner', index: 0, name: '이너 레이어 1' },
+    { category: 'inner', index: 1, name: '이너 레이어 2' },
+    { category: 'inner', index: 2, name: '이너 레이어 3' },
+    { category: 'outer', index: 0, name: '아우터 레이어 1' },
+    { category: 'outer', index: 1, name: '아우터 레이어 2' }
+  ];
+  
+  // 실제로 입을 의상들만 필터링 (레이어 순서대로)
+  const garmentsToWear = layerOrder
+    .filter(layer => params.slots[layer.category]?.[layer.index])
+    .map(layer => ({
+      ...layer,
+      url: params.slots[layer.category][layer.index]
+    }));
+  
+  console.log('[가상 피팅] 입을 의상 목록 (레이어 순서):', garmentsToWear.map(g => g.name));
+  
+  if (garmentsToWear.length === 0) {
+    throw new Error('입을 의상이 없습니다');
   }
   
-  const changedGarmentUrl = params.slots[changedCategory]?.[changedIndex];
-  if (!changedGarmentUrl) {
-    throw new Error(`변경된 슬롯 ${changedCategory}[${changedIndex}]에 의상 이미지가 없습니다`);
-  }
+  // Base64 변환할 이미지들
+  const imagesToConvert = [params.basePersonImageUrl, ...garmentsToWear.map(g => g.url)];
+  const base64Images = await Promise.all(imagesToConvert.map(url => window.imageUrlToBase64(url)));
   
-  console.log(`[가상 피팅] ${changedCategory}[${changedIndex}] 의상만 교체 시작...`);
-  console.log('[가상 피팅] 현재 메인 사진:', params.basePersonImageUrl ? '사용 중' : '없음');
+  const basePersonImageBase64 = base64Images[0];
+  const garmentImagesBase64 = base64Images.slice(1);
   
-  // 변경된 슬롯의 의상 이미지만 사용
-  const garmentImageUrl = changedGarmentUrl;
+  // 프롬프트 생성: 레이어 정보를 명확하게 전달
+  let layerDescription = garmentsToWear.map((g, idx) => 
+    `${idx + 2}번째 이미지: ${g.name} - 순서 ${idx + 1}`
+  ).join('\n');
   
-  console.log(`[가상 피팅] 변경할 의상: ${changedCategory}[${changedIndex}]`);
-  
-  // 현재 메인 사진(첫 번째 이미지)과 변경할 의상 이미지(두 번째 이미지)를 base64로 변환
-  const [currentMainImageBase64, garmentImageBase64] = await Promise.all([
-    window.imageUrlToBase64(params.basePersonImageUrl),
-    window.imageUrlToBase64(garmentImageUrl)
-  ]);
-  
-  // 카테고리에 따른 의상 이름
-  const garmentNames = {
-    outer: '아우터 (블라우저/자켓/코트)',
-    inner: '이너 (티셔츠/셔츠)',
-    bottoms: '하의 (바지/청바지)'
-  };
-  
-  const garmentName = garmentNames[changedCategory] || '의상';
-  
-  // 프롬프트 생성: 현재 메인 사진에 변경할 의상만 입히기
-  const prompt = `다음 두 이미지를 보세요:
-1. 첫 번째 이미지: 현재 메인 사진 (사람이 이미 옷을 입고 있는 사진)
-2. 두 번째 이미지: 새로 입을 ${garmentName} 의상
+  const prompt = `🎨 가상 피팅 요청 - 레이어 순서대로 옷 입히기
 
-작업 요청:
-- 첫 번째 이미지(현재 메인 사진)의 체형, 자세, 얼굴, 비율을 절대 변경하지 마세요
-- 첫 번째 이미지의 사람이 입고 있는 다른 옷들(이너, 아우터, 하의 등)은 그대로 유지하세요
-- 첫 번째 이미지의 ${garmentName}만 두 번째 이미지의 ${garmentName}로 교체하세요
-- 자연스럽고 현실적인 가상 피팅 결과를 생성하세요
-- 배경과 조명은 첫 번째 이미지와 유사하게 유지하세요
+📸 이미지 목록:
+1번째 이미지: 메인 사진 (사람의 기본 체형/얼굴/자세)
+${layerDescription}
 
-결과: 첫 번째 이미지의 사람이 입고 있는 ${garmentName}만 두 번째 이미지의 ${garmentName}로 교체된 합성 이미지를 생성하세요.`;
+📋 작업 순서 (중요!):
+${garmentsToWear.map((g, idx) => `${idx + 1}. ${g.name}를 입힌다`).join('\n')}
+
+⚠️ 중요 규칙:
+- 1번째 이미지(메인 사진)의 사람 체형, 얼굴, 자세는 절대 변경하지 마세요
+- 위 순서대로 옷을 차례대로 입혀주세요 (레이어 개념)
+- 아우터는 가장 바깥쪽, 이너는 중간, 하의는 아래쪽에 위치합니다
+- 모든 의상이 자연스럽게 겹쳐 보여야 합니다
+- 배경과 조명은 1번째 이미지와 동일하게 유지하세요
+
+🎯 최종 결과:
+1번째 이미지의 사람이 ${garmentsToWear.length}개의 옷을 레이어 순서대로 모두 입은 자연스러운 합성 사진을 생성하세요.`;
   
-  // 나노바나나 API 호출 (멀티모달: 현재 메인 사진 + 변경할 의상 이미지)
-  console.log('[가상 피팅] 나노바나나 API 호출 (멀티모달)...');
+  console.log('[가상 피팅] 프롬프트:', prompt);
   
   // 나노바나나 API 호출을 위한 parts 배열 구성
   const parts = [
+    // 첫 번째: 메인 사진
     {
       inlineData: {
         mimeType: 'image/jpeg',
-        data: currentMainImageBase64
+        data: basePersonImageBase64
       }
     },
-    {
+    // 이후: 의상 이미지들 (레이어 순서대로)
+    ...garmentImagesBase64.map(base64 => ({
       inlineData: {
         mimeType: 'image/jpeg',
-        data: garmentImageBase64
+        data: base64
       }
-    },
+    })),
+    // 마지막: 프롬프트
     {
       text: prompt
     }
@@ -704,6 +709,7 @@ function updateMainCanvas(baseImage, composedImage, status) {
     mainCanvasImage.style.display = 'block';
     
     console.log('🖼️ [X 버튼] mainCanvas 확인:', !!mainCanvas);
+    console.log('🖼️ [X 버튼] mainCanvas 클래스:', mainCanvas?.className);
     
     // 🆕 메인 이미지 클릭 이벤트 등록 (이미지가 표시될 때마다)
     mainCanvasImage.style.cursor = 'pointer';
@@ -731,8 +737,35 @@ function updateMainCanvas(baseImage, composedImage, status) {
         removeMainBtn.innerHTML = '×';
         removeMainBtn.title = '전체 초기화';
         removeMainBtn.type = 'button';
+        
+        // 강제로 스타일 적용 (테스트용 - 항상 보이게)
+        removeMainBtn.style.cssText = `
+          position: absolute !important;
+          top: 16px !important;
+          right: 16px !important;
+          width: 32px !important;
+          height: 32px !important;
+          background: rgba(239, 68, 68, 0.9) !important;
+          border: 2px solid white !important;
+          border-radius: 50% !important;
+          color: white !important;
+          font-size: 20px !important;
+          font-weight: bold !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          cursor: pointer !important;
+          z-index: 10000 !important;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important;
+          pointer-events: auto !important;
+          line-height: 1 !important;
+          padding: 0 !important;
+          margin: 0 !important;
+        `;
+        
         mainCanvas.appendChild(removeMainBtn);
         console.log('🖼️ [X 버튼] 새 버튼 생성 완료');
+        console.log('🖼️ [X 버튼] 버튼 위치:', removeMainBtn.getBoundingClientRect());
       }
       
       // X 버튼 클릭 이벤트
@@ -750,6 +783,7 @@ function updateMainCanvas(baseImage, composedImage, status) {
       };
       
       console.log('🖼️ [X 버튼] 이벤트 등록 완료');
+      console.log('🖼️ [X 버튼] 최종 확인 - DOM에 존재:', !!document.querySelector('.remove-main-btn'));
     } else {
       console.warn('🖼️ [X 버튼] ⚠️ mainCanvas가 null입니다!');
     }

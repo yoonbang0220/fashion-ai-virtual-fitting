@@ -670,6 +670,21 @@ function updateMainCanvas(baseImage, composedImage, status) {
   if (imageToShow && mainCanvasImage) {
     mainCanvasImage.src = imageToShow;
     mainCanvasImage.style.display = 'block';
+    
+    // 🆕 메인 이미지 클릭 이벤트 등록 (이미지가 표시될 때마다)
+    mainCanvasImage.style.cursor = 'pointer';
+    mainCanvasImage.onclick = () => {
+      console.log('[메인 캔버스] 이미지 클릭 - 재등록 시작');
+      
+      const confirmed = confirm('새로운 메인 사진을 등록하시겠습니까?\n(현재 피팅된 모든 의상이 초기화됩니다)');
+      
+      if (confirmed) {
+        const photoInput = document.getElementById('photoInput');
+        if (photoInput) {
+          photoInput.click();
+        }
+      }
+    };
   }
 }
 
@@ -987,24 +1002,7 @@ function setupEventListeners() {
     });
   }
   
-  // 🆕 메인 캔버스 이미지 클릭 이벤트 (재등록)
-  const mainCanvasImage = document.getElementById('mainCanvasImage');
-  
-  if (mainCanvasImage) {
-    mainCanvasImage.addEventListener('click', () => {
-      console.log('[메인 캔버스] 이미지 클릭 - 재등록 시작');
-      
-      // 확인 대화상자
-      const confirmed = confirm('새로운 메인 사진을 등록하시겠습니까?\n(현재 피팅된 모든 의상이 초기화됩니다)');
-      
-      if (confirmed) {
-        photoInput.click();
-      }
-    });
-    
-    // 마우스 호버 시 커서 변경
-    mainCanvasImage.style.cursor = 'pointer';
-  }
+  // 메인 캔버스 이미지 클릭 이벤트는 updateMainCanvas에서 처리
   
   if (mainCanvas) {
     mainCanvas.addEventListener('dragover', (e) => {

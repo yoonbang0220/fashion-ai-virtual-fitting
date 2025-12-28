@@ -71,29 +71,76 @@ function compressImage(base64, maxWidth = 800, maxHeight = 800, quality = 0.7) {
  */
 async function imageUrlToBase64ForStorage(imageUrl, isThumbnail = false) {
   try {
-    // 이미 Base64 또는 data URL이면 그대로 반환
-    if (!imageUrl || imageUrl.startsWith('data:')) {
-      return imageUrl;
-    }
-    
-    // blob URL인지 확인
-    if (!imageUrl.startsWith('blob:')) {
-      console.warn('[저장] 지원하지 않는 URL 형식:', imageUrl);
+    // null 또는 undefined 체크
+    if (!imageUrl) {
       return null;
     }
     
-    const response = await fetch(imageUrl);
-    const blob = await response.blob();
-    const arrayBuffer = await blob.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
-
-    if (isThumbnail) {
-      // 썸네일은 더 작게 압축
-      return await compressImage(base64, 512, 512, 0.7);
-    } else {
-      // 메인 이미지는 800x800으로 압축
-      return await compressImage(base64, 800, 800, 0.7);
+    // 이미 data: URL이면 Base64 추출
+    if (imageUrl.startsWith('data:')) {
+      // SVG는 그대로 반환 (압축 불가)
+      if (imageUrl.includes('svg+xml')) {
+        return imageUrl;
+      }
+      
+      // data:image/jpeg;base64,xxxxxx 형식에서 base64 부분만 추출
+      const base64Match = imageUrl.match(/^data:image\/[^;]+;base64,(.+)$/);
+      if (base64Match) {
+        const base64 = base64Match[1];
+        // 압축 시도 (실패하면 원본 반환)
+        try {
+          if (isThumbnail) {
+            return await compressImage(base64, 512, 512, 0.7);
+          } else {
+            return await compressImage(base64, 800, 800, 0.7);
+          }
+        } catch (compressError) {
+          console.warn('[저장] 압축 실패, 원본 반환:', compressError);
+          return base64;
+        }
+      }
+      return imageUrl; // 파싱 실패 시 원본 반환
     }
+    
+    // blob URL 처리
+    if (imageUrl.startsWith('blob:')) {
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      
+      // Blob 크기 체크 (10MB 초과 시 경고)
+      if (blob.size > 10 * 1024 * 1024) {
+        console.warn('[저장] 이미지 크기가 너무 큼 (>10MB):', blob.size);
+      }
+      
+      const arrayBuffer = await blob.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      
+      // 청크 단위로 처리하여 스택 오버플로우 방지
+      const CHUNK_SIZE = 8192;
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+        const chunk = bytes.subarray(i, Math.min(i + CHUNK_SIZE, bytes.length));
+        binary += String.fromCharCode(...chunk);
+      }
+      const base64 = btoa(binary);
+      
+      // 압축
+      try {
+        if (isThumbnail) {
+          return await compressImage(base64, 512, 512, 0.7);
+        } else {
+          return await compressImage(base64, 800, 800, 0.7);
+        }
+      } catch (compressError) {
+        console.warn('[저장] 압축 실패, 원본 반환:', compressError);
+        return base64;
+      }
+    }
+    
+    // 기타 URL 형식은 지원하지 않음
+    console.warn('[저장] 지원하지 않는 URL 형식:', imageUrl.substring(0, 50));
+    return null;
+    
   } catch (error) {
     console.error('[저장] 이미지 변환 실패:', error);
     return null;

@@ -137,6 +137,71 @@ async function imageUrlToBase64ForStorage(imageUrl, isThumbnail = false) {
       }
     }
     
+    // 🆕 외부 URL (http/https) 처리
+    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      // 접근 불가능한 URL 패턴 사전 체크
+      const invalidPatterns = ['replicate.delivery', 'file-cdn.flyai.com', 'file-s3.omniwear.com'];
+      for (const pattern of invalidPatterns) {
+        if (imageUrl.includes(pattern)) {
+          console.warn(`[저장] 접근 불가능한 외부 URL 감지: ${pattern}`);
+          return null;
+        }
+      }
+      
+      try {
+        console.log(`[저장] 외부 URL fetch 시도: ${imageUrl.substring(0, 80)}...`);
+        const response = await fetch(imageUrl, { 
+          mode: 'cors',
+          credentials: 'omit'
+        });
+        
+        if (!response.ok) {
+          console.warn(`[저장] 외부 URL fetch 실패: ${response.status} ${response.statusText}`);
+          return null;
+        }
+        
+        const blob = await response.blob();
+        
+        // 이미지 타입 확인
+        if (!blob.type.startsWith('image/')) {
+          console.warn('[저장] 이미지가 아닌 파일 타입:', blob.type);
+          return null;
+        }
+        
+        // Blob 크기 체크 (10MB 초과 시 경고)
+        if (blob.size > 10 * 1024 * 1024) {
+          console.warn('[저장] 이미지 크기가 너무 큼 (>10MB):', blob.size);
+        }
+        
+        const arrayBuffer = await blob.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        
+        // 청크 단위로 처리하여 스택 오버플로우 방지
+        const CHUNK_SIZE = 8192;
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+          const chunk = bytes.subarray(i, Math.min(i + CHUNK_SIZE, bytes.length));
+          binary += String.fromCharCode(...chunk);
+        }
+        const base64 = btoa(binary);
+        
+        // 압축
+        try {
+          if (isThumbnail) {
+            return await compressImage(base64, 512, 512, 0.7);
+          } else {
+            return await compressImage(base64, 800, 800, 0.7);
+          }
+        } catch (compressError) {
+          console.warn('[저장] 압축 실패, 원본 반환:', compressError);
+          return base64;
+        }
+      } catch (error) {
+        console.warn(`[저장] 외부 URL 변환 실패: ${error.message}`);
+        return null;
+      }
+    }
+    
     // 기타 URL 형식은 지원하지 않음
     console.warn('[저장] 지원하지 않는 URL 형식:', imageUrl.substring(0, 50));
     return null;
@@ -182,31 +247,98 @@ export function getSessionId() {
  */
 export async function saveState(sessionId, state) {
   try {
+    console.log('\n💾 ═══════════════════════════════════════════════════════════');
+    console.log('💾 백엔드 저장 시작');
+    console.log('💾 ═══════════════════════════════════════════════════════════');
+    console.log(`📦 세션 ID: ${sessionId}`);
+    console.log('📤 저장 전 상태 요약:');
+    console.log('   - basePersonImageUrl:', state.basePersonImageUrl ? 
+      (state.basePersonImageUrl.startsWith('blob:') ? 'blob URL' : 
+       state.basePersonImageUrl.startsWith('data:') ? 'data URL' : 
+       '외부 URL') + ` (${state.basePersonImageUrl.substring(0, 50)}...)` : 'null');
+    console.log('   - composedImageUrl:', state.composedImageUrl ? '있음' : 'null');
+    console.log('   - status:', state.status);
+    
+    // initialOutfitState 요약
+    if (state.initialOutfitState) {
+      const outfitSummary = {
+        outer: state.initialOutfitState.outer.map((s, i) => s ? `[${i}]:${s.substring(0, 30)}...` : `[${i}]:null`),
+        inner: state.initialOutfitState.inner.map((s, i) => s ? `[${i}]:${s.substring(0, 30)}...` : `[${i}]:null`),
+        bottoms: state.initialOutfitState.bottoms.map((s, i) => s ? `[${i}]:${s.substring(0, 30)}...` : `[${i}]:null`)
+      };
+      console.log('   - initialOutfitState:', JSON.stringify(outfitSummary, null, 2).substring(0, 200) + '...');
+    }
+    
+    console.log('\n🔄 이미지 변환 중... (blob URL → Base64)');
+    
     // 이미지 URL을 Base64로 변환
     const stateWithBase64 = await convertImagesToBase64(state);
+
+    console.log('\n📊 변환 후 저장 데이터 요약:');
+    // base64 문자열인지 확인 (data: 접두사 있거나, base64 문자열인 경우)
+    const isBase64 = (str) => {
+      if (!str) return false;
+      if (str.startsWith('data:')) return true;
+      // base64 문자열 체크 (대략적인 패턴)
+      if (str.length > 100 && /^[A-Za-z0-9+/=]+$/.test(str)) return true;
+      return false;
+    };
+    console.log('   - basePersonImageUrl:', stateWithBase64.basePersonImageUrl ? 
+      (isBase64(stateWithBase64.basePersonImageUrl) ? 'base64 이미지' : 'null') : 'null');
+    console.log('   - composedImageUrl:', stateWithBase64.composedImageUrl ? 
+      (isBase64(stateWithBase64.composedImageUrl) ? 'base64 이미지' : 'null') : 'null');
+    
+    // initialOutfitState 변환 결과 (간소화)
+    if (stateWithBase64.initialOutfitState) {
+      const convertedOutfit = {
+        outer: stateWithBase64.initialOutfitState.outer.map((s, i) => {
+          if (!s) return `[${i}]:null`;
+          return `[${i}]:base64`;
+        }),
+        inner: stateWithBase64.initialOutfitState.inner.map((s, i) => {
+          if (!s) return `[${i}]:null`;
+          return `[${i}]:base64`;
+        }),
+        bottoms: stateWithBase64.initialOutfitState.bottoms.map((s, i) => {
+          if (!s) return `[${i}]:null`;
+          return `[${i}]:base64`;
+        })
+      };
+      console.log('   - initialOutfitState (변환 후):');
+      console.log('      Outer:', convertedOutfit.outer.join(', '));
+      console.log('      Inner:', convertedOutfit.inner.join(', '));
+      console.log('      Bottoms:', convertedOutfit.bottoms.join(', '));
+    }
 
     // Local Storage에 저장 (압축된 버전)
     try {
       const stateStr = JSON.stringify(stateWithBase64);
       const stateSizeMB = new Blob([stateStr]).size / (1024 * 1024);
+      const stateSizeKB = (new Blob([stateStr]).size / 1024).toFixed(1);
+
+      console.log(`\n💾 저장 데이터 크기: ${stateSizeKB}KB (${stateSizeMB.toFixed(2)}MB)`);
 
       if (stateSizeMB > 5) {
-        console.warn('[저장] 상태 크기가 5MB를 초과하여 Local Storage 저장 스킵');
+        console.warn('[저장] ⚠️ 상태 크기가 5MB를 초과하여 Local Storage 저장 스킵');
       } else {
         localStorage.setItem(`fashionAI_state_${sessionId}`, stateStr);
-        console.log('[저장] Local Storage 저장 완료:', stateSizeMB.toFixed(2), 'MB');
+        console.log(`[저장] ✅ Local Storage 저장 완료`);
+        console.log(`   → 키: fashionAI_state_${sessionId}`);
+        console.log(`   → 크기: ${stateSizeKB}KB`);
+        console.log(`   → 위치: 브라우저 Local Storage`);
       }
     } catch (error) {
       if (error.name === 'QuotaExceededError') {
-        console.warn('[저장] Local Storage 용량 초과, Supabase에만 저장');
+        console.warn('[저장] ⚠️ Local Storage 용량 초과, Supabase에만 저장');
       } else {
-        console.warn('[저장] Local Storage 저장 실패:', error);
+        console.warn('[저장] ⚠️ Local Storage 저장 실패:', error);
       }
     }
 
     // Supabase에 저장
     if (supabaseClient) {
       try {
+        console.log('\n☁️ Supabase 저장 시도 중...');
         const { error } = await supabaseClient
           .from('fashion_ai_states')
           .upsert({
@@ -218,16 +350,23 @@ export async function saveState(sessionId, state) {
           });
 
         if (error) {
-          console.error('[저장] Supabase 저장 실패:', error);
+          console.error('[저장] ❌ Supabase 저장 실패:', error);
         } else {
-          console.log('[저장] Supabase 저장 완료');
+          console.log('[저장] ✅ Supabase 저장 완료');
+          console.log('   → 테이블: fashion_ai_states');
+          console.log('   → 세션 ID:', sessionId);
+          console.log('   → 업데이트 시간:', new Date().toISOString());
         }
       } catch (error) {
-        console.error('[저장] Supabase 저장 오류:', error);
+        console.error('[저장] ❌ Supabase 저장 오류:', error);
       }
+    } else {
+      console.log('[저장] ⚠️ Supabase 클라이언트 없음, Local Storage만 사용');
     }
+    
+    console.log('💾 ═══════════════════════════════════════════════════════════\n');
   } catch (error) {
-    console.error('[저장] 전체 저장 실패:', error);
+    console.error('[저장] ❌ 전체 저장 실패:', error);
   }
 }
 
@@ -236,44 +375,92 @@ export async function saveState(sessionId, state) {
  */
 export async function loadState(sessionId) {
   try {
+    console.log('\n📥 ═══════════════════════════════════════════════════════════');
+    console.log('📥 백엔드에서 상태 로드 시작');
+    console.log('📥 ═══════════════════════════════════════════════════════════');
+    console.log(`📦 세션 ID: ${sessionId}`);
+    
     // 1순위: Local Storage
     const localStateStr = localStorage.getItem(`fashionAI_state_${sessionId}`);
     if (localStateStr) {
       try {
+        const stateSizeKB = (new Blob([localStateStr]).size / 1024).toFixed(1);
+        console.log(`\n💾 [1순위] Local Storage에서 로드 시도...`);
+        console.log(`   → 키: fashionAI_state_${sessionId}`);
+        console.log(`   → 크기: ${stateSizeKB}KB`);
+        
         const localState = JSON.parse(localStateStr);
-        console.log('[로드] Local Storage에서 상태 로드');
-        return restoreImagesFromBase64(localState);
+        console.log('   ✅ 파싱 성공');
+        
+        console.log('\n🔄 Base64 → Blob URL 변환 중...');
+        const restored = restoreImagesFromBase64(localState);
+        
+        console.log('\n📊 로드된 상태 요약:');
+        console.log('   - basePersonImageUrl:', restored.basePersonImageUrl ? 
+          (restored.basePersonImageUrl.startsWith('blob:') ? 'blob URL' : 'data URL') : 'null');
+        console.log('   - composedImageUrl:', restored.composedImageUrl ? '있음' : 'null');
+        console.log('   - status:', restored.status);
+        if (restored.initialOutfitState) {
+          console.log('   - initialOutfitState:');
+          console.log('      Outer:', restored.initialOutfitState.outer.map((s, i) => s ? `[${i}]:있음` : `[${i}]:없음`).join(', '));
+          console.log('      Inner:', restored.initialOutfitState.inner.map((s, i) => s ? `[${i}]:있음` : `[${i}]:없음`).join(', '));
+          console.log('      Bottoms:', restored.initialOutfitState.bottoms.map((s, i) => s ? `[${i}]:있음` : `[${i}]:없음`).join(', '));
+        }
+        console.log('📥 ═══════════════════════════════════════════════════════════\n');
+        return restored;
       } catch (error) {
-        console.warn('[로드] Local Storage 파싱 실패:', error);
+        console.warn('[로드] ❌ Local Storage 파싱 실패:', error);
       }
+    } else {
+      console.log('\n💾 [1순위] Local Storage: 데이터 없음');
     }
 
     // 2순위: Supabase
     if (supabaseClient) {
       try {
+        console.log('\n☁️ [2순위] Supabase에서 로드 시도...');
+        console.log(`   → 테이블: fashion_ai_states`);
+        console.log(`   → 세션 ID: ${sessionId}`);
+        
         const { data, error } = await supabaseClient
           .from('fashion_ai_states')
-          .select('state_data')
+          .select('state_data, updated_at')
           .eq('session_id', sessionId)
           .single();
 
         if (error) {
-          console.warn('[로드] Supabase 로드 실패:', error);
+          console.warn(`   ❌ 로드 실패: ${error.message}`);
+          console.log('📥 ═══════════════════════════════════════════════════════════\n');
           return null;
         }
 
         if (data && data.state_data) {
-          console.log('[로드] Supabase에서 상태 로드');
-          return restoreImagesFromBase64(data.state_data);
+          console.log('   ✅ 데이터 발견');
+          console.log(`   → 업데이트 시간: ${data.updated_at}`);
+          
+          console.log('\n🔄 Base64 → Blob URL 변환 중...');
+          const restored = restoreImagesFromBase64(data.state_data);
+          
+          console.log('\n📊 로드된 상태 요약:');
+          console.log('   - basePersonImageUrl:', restored.basePersonImageUrl ? 'blob URL' : 'null');
+          console.log('   - composedImageUrl:', restored.composedImageUrl ? '있음' : 'null');
+          console.log('   - status:', restored.status);
+          console.log('📥 ═══════════════════════════════════════════════════════════\n');
+          return restored;
+        } else {
+          console.log('   ⚠️ 데이터 없음');
         }
       } catch (error) {
-        console.error('[로드] Supabase 로드 오류:', error);
+        console.error('[로드] ❌ Supabase 로드 오류:', error);
       }
+    } else {
+      console.log('\n☁️ [2순위] Supabase: 클라이언트 없음');
     }
 
+    console.log('📥 ═══════════════════════════════════════════════════════════\n');
     return null;
   } catch (error) {
-    console.error('[로드] 전체 로드 실패:', error);
+    console.error('[로드] ❌ 전체 로드 실패:', error);
     return null;
   }
 }
@@ -283,40 +470,94 @@ export async function loadState(sessionId) {
  */
 async function convertImagesToBase64(state) {
   const converted = JSON.parse(JSON.stringify(state));
+  let conversionCount = 0;
+  let conversionSuccess = 0;
+  let conversionFailed = 0;
 
   // basePersonImageUrl 변환
   if (converted.basePersonImageUrl && !converted.basePersonImageUrl.startsWith('data:')) {
+    conversionCount++;
+    console.log('   🔄 [1] basePersonImageUrl 변환 중...');
     try {
       const base64 = await imageUrlToBase64ForStorage(converted.basePersonImageUrl, false);
       if (base64) {
+        const sizeKB = (base64.length / 1024).toFixed(1);
         converted.basePersonImageUrl = base64;
         converted._basePersonImageIsBase64 = true;
+        conversionSuccess++;
+        console.log(`      ✅ 변환 완료: ${sizeKB}KB`);
       } else {
-        // 변환 실패 시 제거
-        console.warn('[저장] basePersonImageUrl 변환 실패, 제거함');
+        console.warn('      ❌ 변환 실패, 제거함');
         converted.basePersonImageUrl = null;
+        conversionFailed++;
       }
     } catch (error) {
-      console.warn('[저장] basePersonImageUrl 변환 오류:', error);
+      console.warn(`      ❌ 변환 오류: ${error.message}`);
       converted.basePersonImageUrl = null;
+      conversionFailed++;
     }
+  } else if (converted.basePersonImageUrl) {
+    console.log('   ⏭️ [1] basePersonImageUrl: 이미 Base64 (변환 불필요)');
   }
 
   // composedImageUrl 변환
   if (converted.composedImageUrl && !converted.composedImageUrl.startsWith('data:')) {
+    conversionCount++;
+    console.log('   🔄 [2] composedImageUrl 변환 중...');
     try {
       const base64 = await imageUrlToBase64ForStorage(converted.composedImageUrl, false);
       if (base64) {
+        const sizeKB = (base64.length / 1024).toFixed(1);
         converted.composedImageUrl = base64;
         converted._composedImageIsBase64 = true;
+        conversionSuccess++;
+        console.log(`      ✅ 변환 완료: ${sizeKB}KB`);
       } else {
-        // 변환 실패 시 제거
-        console.warn('[저장] composedImageUrl 변환 실패, 제거함');
+        console.warn('      ❌ 변환 실패, 제거함');
         converted.composedImageUrl = null;
+        conversionFailed++;
       }
     } catch (error) {
-      console.warn('[저장] composedImageUrl 변환 오류:', error);
+      console.warn(`      ❌ 변환 오류: ${error.message}`);
       converted.composedImageUrl = null;
+      conversionFailed++;
+    }
+  } else if (converted.composedImageUrl) {
+    console.log('   ⏭️ [2] composedImageUrl: 이미 Base64 (변환 불필요)');
+  }
+
+  // initialOutfitState 이미지 변환
+  let outfitImageIndex = 3;
+  for (const category of ['outer', 'inner', 'bottoms']) {
+    if (converted.initialOutfitState && converted.initialOutfitState[category]) {
+      for (let i = 0; i < converted.initialOutfitState[category].length; i++) {
+        const outfit = converted.initialOutfitState[category][i];
+        if (outfit && typeof outfit === 'string' && !outfit.startsWith('data:')) {
+          conversionCount++;
+          console.log(`   🔄 [${outfitImageIndex}] initialOutfitState.${category}[${i}] 변환 중...`);
+          try {
+            const base64 = await imageUrlToBase64ForStorage(outfit, true);
+            if (base64) {
+              const sizeKB = (base64.length / 1024).toFixed(1);
+              converted.initialOutfitState[category][i] = base64;
+              if (!converted._initialOutfitStateBase64) converted._initialOutfitStateBase64 = {};
+              if (!converted._initialOutfitStateBase64[category]) converted._initialOutfitStateBase64[category] = {};
+              converted._initialOutfitStateBase64[category][i] = true;
+              conversionSuccess++;
+              console.log(`      ✅ 변환 완료: ${sizeKB}KB`);
+            } else {
+              console.warn(`      ❌ 변환 실패, 제거함`);
+              converted.initialOutfitState[category][i] = null;
+              conversionFailed++;
+            }
+          } catch (error) {
+            console.warn(`      ❌ 변환 오류: ${error.message}`);
+            converted.initialOutfitState[category][i] = null;
+            conversionFailed++;
+          }
+          outfitImageIndex++;
+        }
+      }
     }
   }
 
@@ -326,26 +567,35 @@ async function convertImagesToBase64(state) {
       for (let i = 0; i < converted.slots[category].length; i++) {
         const slot = converted.slots[category][i];
         if (slot && typeof slot === 'string' && !slot.startsWith('data:')) {
+          conversionCount++;
+          console.log(`   🔄 [${outfitImageIndex}] slots.${category}[${i}] 변환 중...`);
           try {
             const base64 = await imageUrlToBase64ForStorage(slot, true);
             if (base64) {
+              const sizeKB = (base64.length / 1024).toFixed(1);
               converted.slots[category][i] = base64;
               if (!converted._slotsBase64) converted._slotsBase64 = {};
               if (!converted._slotsBase64[category]) converted._slotsBase64[category] = {};
               converted._slotsBase64[category][i] = true;
+              conversionSuccess++;
+              console.log(`      ✅ 변환 완료: ${sizeKB}KB`);
             } else {
-              // 변환 실패 시 제거
-              console.warn(`[저장] ${category}[${i}] 변환 실패, 제거함`);
+              console.warn(`      ❌ 변환 실패, 제거함`);
               converted.slots[category][i] = null;
+              conversionFailed++;
             }
           } catch (error) {
-            console.warn(`[저장] ${category}[${i}] 변환 오류:`, error);
+            console.warn(`      ❌ 변환 오류: ${error.message}`);
             converted.slots[category][i] = null;
+            conversionFailed++;
           }
+          outfitImageIndex++;
         }
       }
     }
   }
+
+  console.log(`\n📊 변환 요약: 총 ${conversionCount}개 이미지 중 ${conversionSuccess}개 성공, ${conversionFailed}개 실패`);
 
   return converted;
 }
@@ -355,27 +605,75 @@ async function convertImagesToBase64(state) {
  */
 function restoreImagesFromBase64(state) {
   const restored = JSON.parse(JSON.stringify(state));
+  let restoreCount = 0;
+  let restoreSuccess = 0;
+  let restoreFailed = 0;
 
   // basePersonImageUrl 복원
   if (restored._basePersonImageIsBase64 && restored.basePersonImageUrl) {
-    console.log('[복원] basePersonImageUrl 변환 중...');
-    restored.basePersonImageUrl = base64ToImageUrl(restored.basePersonImageUrl);
-    delete restored._basePersonImageIsBase64;
+    restoreCount++;
+    console.log('   🔄 [1] basePersonImageUrl: Base64 → Blob URL 변환 중...');
+    try {
+      const base64SizeKB = (restored.basePersonImageUrl.length / 1024).toFixed(1);
+      restored.basePersonImageUrl = base64ToImageUrl(restored.basePersonImageUrl);
+      delete restored._basePersonImageIsBase64;
+      restoreSuccess++;
+      console.log(`      ✅ 복원 완료 (원본: ${base64SizeKB}KB → Blob URL)`);
+    } catch (error) {
+      console.warn(`      ❌ 복원 실패: ${error.message}`);
+      restored.basePersonImageUrl = null;
+      restoreFailed++;
+    }
   } else if (restored.basePersonImageUrl && restored.basePersonImageUrl.startsWith('blob:')) {
-    // 유효하지 않은 blob URL 제거
-    console.warn('[복원] 유효하지 않은 blob URL 감지, 제거함:', restored.basePersonImageUrl);
+    console.warn('   ⚠️ [1] basePersonImageUrl: 유효하지 않은 blob URL 감지, 제거함');
     restored.basePersonImageUrl = null;
   }
 
   // composedImageUrl 복원
   if (restored._composedImageIsBase64 && restored.composedImageUrl) {
-    console.log('[복원] composedImageUrl 변환 중...');
-    restored.composedImageUrl = base64ToImageUrl(restored.composedImageUrl);
-    delete restored._composedImageIsBase64;
+    restoreCount++;
+    console.log('   🔄 [2] composedImageUrl: Base64 → Blob URL 변환 중...');
+    try {
+      const base64SizeKB = (restored.composedImageUrl.length / 1024).toFixed(1);
+      restored.composedImageUrl = base64ToImageUrl(restored.composedImageUrl);
+      delete restored._composedImageIsBase64;
+      restoreSuccess++;
+      console.log(`      ✅ 복원 완료 (원본: ${base64SizeKB}KB → Blob URL)`);
+    } catch (error) {
+      console.warn(`      ❌ 복원 실패: ${error.message}`);
+      restored.composedImageUrl = null;
+      restoreFailed++;
+    }
   } else if (restored.composedImageUrl && restored.composedImageUrl.startsWith('blob:')) {
-    // 유효하지 않은 blob URL 제거
-    console.warn('[복원] 유효하지 않은 blob URL 감지, 제거함:', restored.composedImageUrl);
+    console.warn('   ⚠️ [2] composedImageUrl: 유효하지 않은 blob URL 감지, 제거함');
     restored.composedImageUrl = null;
+  }
+
+  // initialOutfitState 이미지 복원
+  let outfitImageIndex = 3;
+  if (restored._initialOutfitStateBase64) {
+    for (const category of ['outer', 'inner', 'bottoms']) {
+      if (restored._initialOutfitStateBase64[category] && restored.initialOutfitState && restored.initialOutfitState[category]) {
+        for (let i = 0; i < restored.initialOutfitState[category].length; i++) {
+          if (restored._initialOutfitStateBase64[category][i] && restored.initialOutfitState[category][i]) {
+            restoreCount++;
+            console.log(`   🔄 [${outfitImageIndex}] initialOutfitState.${category}[${i}]: Base64 → Blob URL 변환 중...`);
+            try {
+              const base64SizeKB = (restored.initialOutfitState[category][i].length / 1024).toFixed(1);
+              restored.initialOutfitState[category][i] = base64ToImageUrl(restored.initialOutfitState[category][i]);
+              restoreSuccess++;
+              console.log(`      ✅ 복원 완료 (원본: ${base64SizeKB}KB → Blob URL)`);
+            } catch (error) {
+              console.warn(`      ❌ 복원 실패: ${error.message}`);
+              restored.initialOutfitState[category][i] = null;
+              restoreFailed++;
+            }
+            outfitImageIndex++;
+          }
+        }
+      }
+    }
+    delete restored._initialOutfitStateBase64;
   }
 
   // 슬롯 이미지 복원
@@ -384,8 +682,19 @@ function restoreImagesFromBase64(state) {
       if (restored._slotsBase64[category] && restored.slots && restored.slots[category]) {
         for (let i = 0; i < restored.slots[category].length; i++) {
           if (restored._slotsBase64[category][i] && restored.slots[category][i]) {
-            console.log(`[복원] ${category}[${i}] 변환 중...`);
-            restored.slots[category][i] = base64ToImageUrl(restored.slots[category][i]);
+            restoreCount++;
+            console.log(`   🔄 [${outfitImageIndex}] slots.${category}[${i}]: Base64 → Blob URL 변환 중...`);
+            try {
+              const base64SizeKB = (restored.slots[category][i].length / 1024).toFixed(1);
+              restored.slots[category][i] = base64ToImageUrl(restored.slots[category][i]);
+              restoreSuccess++;
+              console.log(`      ✅ 복원 완료 (원본: ${base64SizeKB}KB → Blob URL)`);
+            } catch (error) {
+              console.warn(`      ❌ 복원 실패: ${error.message}`);
+              restored.slots[category][i] = null;
+              restoreFailed++;
+            }
+            outfitImageIndex++;
           }
         }
       }
@@ -397,12 +706,16 @@ function restoreImagesFromBase64(state) {
       if (restored.slots[category]) {
         for (let i = 0; i < restored.slots[category].length; i++) {
           if (restored.slots[category][i] && restored.slots[category][i].startsWith('blob:')) {
-            console.warn(`[복원] 유효하지 않은 blob URL 감지, 제거함: ${category}[${i}]`);
+            console.warn(`   ⚠️ slots.${category}[${i}]: 유효하지 않은 blob URL 감지, 제거함`);
             restored.slots[category][i] = null;
           }
         }
       }
     }
+  }
+
+  if (restoreCount > 0) {
+    console.log(`\n📊 복원 요약: 총 ${restoreCount}개 이미지 중 ${restoreSuccess}개 성공, ${restoreFailed}개 실패`);
   }
 
   return restored;

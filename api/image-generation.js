@@ -26,25 +26,58 @@ async function imageUrlToBase64(imageUrl) {
 }
 
 /**
- * 의상 썸네일 생성을 위한 프롬프트 생성
+ * 의상 감지 및 추출을 위한 프롬프트 생성
  */
 function generatePromptForGarment(garmentType, category) {
-  const garmentNames = {
-    outer: '아우터 (블라우저/자켓/코트)',
-    inner: '이너 (티셔츠/셔츠)',
-    bottoms: '하의 (바지/청바지)'
+  // 🆕 카테고리별 구체적인 의상 설명
+  const garmentDescriptions = {
+    // Outer
+    'heavyOuter': '헤비 아우터: 코트, 패딩, 무스탕, 롱코트 등 (두꺼운 겉옷)',
+    'lightOuter': '라이트 아우터: 블레이저, 재킷, 자켓, 점퍼, 데님자켓, 가죽자켓 등 (얇은 겉옷)',
+    // Inner
+    'midLayer': '미드 레이어: 가디건, 집업, 후드집업 등 (중간 레이어)',
+    'mainTop': '메인 상의: 니트, 스웨터, 후드티, 맨투맨, 조끼, 베스트 등 (메인 상의)',
+    'baseInner': '베이스 이너: 티셔츠, 셔츠, 남방, 목폴라, 반팔티, 긴팔티 등 (기본 이너웨어)',
+    // Bottoms
+    'bottoms': '하의: 바지, 청바지, 슬랙스, 치마, 반바지 등',
+    // 기본값 (fallback)
+    'outer': '아우터 (재킷, 자켓, 코트, 블레이저, 패딩 등)',
+    'inner': '이너 상의 (티셔츠, 셔츠, 니트, 맨투맨, 후드티 등)',
+    'default': '의상'
   };
 
-  const garmentName = garmentNames[garmentType] || '의상';
+  // category가 있으면 우선 사용, 없으면 garmentType 사용
+  const garmentDescription = garmentDescriptions[category] || garmentDescriptions[garmentType] || garmentDescriptions['default'];
 
-  return `온라인 쇼핑몰 스타일의 의상 썸네일을 생성하세요:
-- ${garmentName} 제품 사진
-- 깔끔한 흰색 배경
-- 의상이 중앙에 위치하고 적절한 여백이 있음
-- 자연스러운 조명
-- 제품 디테일이 선명하게 보임
-- 전면 뷰, 입체감 있게
-- 고품질, 전문적인 촬영 스타일`;
+  return `🔍 CRITICAL: Check if this garment EXISTS in the photo
+
+GARMENT TO CHECK: ${garmentDescription}
+
+STEP 1: TEXT RESPONSE FIRST
+Answer ONLY with one word: "YES" or "NO"
+
+STEP 2: If YES, then extract the garment image
+- Show the garment on white background
+- Only if you answered "YES" in Step 1
+- IMPORTANT: Return the image as BASE64 inline data (NOT as external URL)
+- Prefer inline base64 image over external URL
+
+❌ DO NOT CREATE garments that don't exist
+❌ DO NOT generate fake clothing
+❌ DO NOT return external URLs that may expire
+✅ ONLY extract if the garment is clearly visible
+✅ Return base64 inline image data for reliable storage
+
+EXAMPLES:
+1. Photo: man wearing jacket + t-shirt + pants
+   Looking for: jacket → Answer: "YES" then extract jacket as base64 inline image
+   
+2. Photo: man wearing jacket + t-shirt + pants  
+   Looking for: sweater → Answer: "NO" (no sweater visible)
+
+ANSWER FORMAT:
+First line: "YES" or "NO"
+Then (only if YES): garment image as base64 inline data`;
 }
 
 /**
@@ -56,16 +89,16 @@ async function callNanoBananaAPI(prompt, originalImageUrl = null) {
     throw new Error('GEMINI_API_KEY not set');
   }
 
-  // Gemini 3 모델 우선, 그 다음 이미지 생성 최적화 모델
+  // 🆕 텍스트 기반 모델 우선 (YES/NO 판단용), 이미지 생성 모델은 나중에
   const models = [
-    'gemini-3-pro-image-preview',            // Gemini 3 프로 이미지 생성 (최우선)
-    'gemini-3-flash-preview',                // Gemini 3 플래시 (최우선)
-    'gemini-3-pro-preview',                  // Gemini 3 프로 (최우선)
+    'gemini-2.5-flash',                      // 텍스트 모델 (YES/NO 판단 우선)
+    'gemini-2.5-pro',                        // 텍스트 프로 (YES/NO 판단 우선)
+    'gemini-3-pro-preview',                  // Gemini 3 프로 (텍스트)
+    'gemini-3-flash-preview',                // Gemini 3 플래시 (텍스트)
+    'gemini-3-pro-image-preview',            // Gemini 3 프로 이미지 생성
     'gemini-2.0-flash-exp-image-generation', // 이미지 생성 전용
     'gemini-2.5-flash-image',                // 이미지 생성 최적화
-    'nano-banana-pro-preview',               // 나노바나나
-    'gemini-2.5-flash',                      // 일반 텍스트 (Fallback)
-    'gemini-2.5-pro'                         // 일반 텍스트 프로 (Fallback)
+    'nano-banana-pro-preview'                // 나노바나나
   ];
 
   // Parts 배열 구성
@@ -88,8 +121,10 @@ async function callNanoBananaAPI(prompt, originalImageUrl = null) {
 
   for (const model of models) {
     try {
-      console.log(`[나노바나나] ${model} 모델 시도...`);
-
+      // 🆕 타임아웃 추가 (30초)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
         {
@@ -102,61 +137,112 @@ async function callNanoBananaAPI(prompt, originalImageUrl = null) {
               parts: parts
             }],
             generationConfig: {
-              temperature: 0.9,
-              topK: 40,
-              topP: 0.95,
+              temperature: 0.1,  // 낮춤: 더 정확한 YES/NO 판단
+              topK: 10,          // 낮춤: 더 보수적으로
+              topP: 0.7,         // 낮춤: 더 일관성 있게
               maxOutputTokens: 8192,
             }
-          })
+          }),
+          signal: controller.signal
         }
       );
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.warn(`[나노바나나] ${model} 실패: ${response.status}`, errorText.substring(0, 200));
-        
+        // 마지막 모델이 아니면 조용히 다음 모델 시도 (로그 최소화)
         if (response.status === 429 || response.status === 404 || response.status === 400) {
           continue; // 다음 모델 시도
         }
-        throw new Error(`API error: ${response.status}`);
+        // 심각한 오류만 throw
+        if (model === models[models.length - 1]) {
+          const errorText = await response.text();
+          console.warn(`[나노바나나] 모든 모델 실패: ${response.status}`);
+        }
+        continue; // 다음 모델 시도
       }
 
       const data = await response.json();
-      console.log('[나노바나나] API 응답 수신:', model);
 
-      // 응답에서 이미지 추출
+      // 응답 파싱
       if (data.candidates && data.candidates[0]?.content?.parts) {
         const responseParts = data.candidates[0].content.parts;
 
-        // base64 이미지 찾기
+        // 🆕 1순위: 텍스트 응답 먼저 확인 (YES/NO 판단)
+        let textResponse = '';
+        for (const part of responseParts) {
+          if (part.text) {
+            textResponse += part.text;
+          }
+        }
+        
+        if (textResponse) {
+          const upperText = textResponse.toUpperCase();
+          
+          // NO 응답 감지 (의상 없음) - 즉시 null 반환 (다른 모델 시도 안 함)
+          if (upperText.includes('NO') || 
+              upperText.includes('NOT_FOUND') || 
+              upperText.includes('NOT FOUND') ||
+              textResponse.includes('없음') ||
+              textResponse.includes('감지되지 않') ||
+              textResponse.includes('없습니다')) {
+            // NO는 정상적인 응답이므로 특별한 에러 코드로 반환
+            return 'NOT_FOUND';
+          }
+        }
+
+        // 2순위: base64 이미지 찾기
         for (const part of responseParts) {
           if (part.inlineData && part.inlineData.mimeType?.startsWith('image/')) {
-            console.log('[나노바나나] ✅ 이미지 생성 성공!');
             return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
           }
         }
 
-        // 텍스트 응답에서 URL 추출 시도
-        if (responseParts[0]?.text) {
-          const urlMatch = responseParts[0].text.match(/(https?:\/\/[^\s]+\.(?:jpg|jpeg|png|gif|webp))/i);
+        // 3순위: 텍스트 응답에서 URL 추출 시도
+        if (textResponse) {
+          const urlMatch = textResponse.match(/(https?:\/\/[^\s]+\.(?:jpg|jpeg|png|gif|webp))/i);
           if (urlMatch) {
-            console.log('[나노바나나] ✅ 이미지 URL 발견:', urlMatch[1]);
-            return urlMatch[1];
+            const imageUrl = urlMatch[1];
+            
+            // Placeholder URL 체크
+            if (imageUrl.includes('placeholder') || imageUrl.includes('imgur.com/result_')) {
+              continue; // 다음 모델 시도
+            }
+            
+            console.log('[나노바나나] ✅ 이미지 URL 발견:', imageUrl);
+            return imageUrl;
           }
         }
       }
 
-      throw new Error('이미지가 응답에 포함되지 않음');
+      // 이미지가 없으면 다음 모델 시도 (에러 throw 안 함)
+      continue;
     } catch (error) {
-      console.warn(`[나노바나나] ${model} 실패:`, error.message);
-      if (model === models[models.length - 1]) {
-        throw error;
+      // 타임아웃 에러 처리
+      if (error.name === 'AbortError') {
+        // 마지막 모델이 아니면 조용히 다음 모델 시도
+        if (model !== models[models.length - 1]) {
+          continue;
+        }
+        continue; // 마지막 모델도 타임아웃이면 그냥 다음으로
       }
+      
+      // NOT_FOUND는 정상 응답이므로 즉시 반환 (에러가 아님)
+      if (error.message && (error.message.includes('NOT_FOUND') || error.message.includes('의상이 사진에 없습니다'))) {
+        return 'NOT_FOUND';
+      }
+      
+      // 마지막 모델이 아니면 조용히 다음 모델 시도 (로그 출력 안 함)
+      if (model !== models[models.length - 1]) {
+        continue;
+      }
+      // 마지막 모델 실패 시에만 로그 출력 (NOT_FOUND 제외)
       continue;
     }
   }
 
-  throw new Error('모든 나노바나나 모델 실패');
+  // 모든 모델 실패 - null 반환 (에러 throw 안 함)
+  return null;
 }
 
 /**
@@ -229,43 +315,97 @@ function generateDummyThumbnail(garmentType, category) {
 }
 
 /**
- * 의상 썸네일 생성 (메인 함수)
+ * 외부 URL을 Blob URL로 변환 (만료 방지)
+ */
+async function convertExternalUrlToBlob(imageUrl) {
+  try {
+    // 접근 불가능한 URL 패턴 사전 체크
+    const invalidPatterns = ['replicate.delivery', 'file-cdn.flyai.com', 'file-s3.omniwear.com'];
+    for (const pattern of invalidPatterns) {
+      if (imageUrl.includes(pattern)) {
+        console.warn(`[의상 감지] 접근 불가능한 외부 URL 감지: ${pattern}`);
+        return null;
+      }
+    }
+    
+    // 외부 URL fetch 시도
+    const response = await fetch(imageUrl, { 
+      mode: 'cors',
+      credentials: 'omit'
+    });
+    
+    if (!response.ok) {
+      console.warn(`[의상 감지] 외부 URL fetch 실패: ${response.status} ${response.statusText}`);
+      return null;
+    }
+    
+    const blob = await response.blob();
+    
+    // 이미지 타입 확인
+    if (!blob.type.startsWith('image/')) {
+      console.warn('[의상 감지] 이미지가 아닌 파일 타입:', blob.type);
+      return null;
+    }
+    
+    // Blob URL 생성
+    const blobUrl = URL.createObjectURL(blob);
+    console.log(`[의상 감지] 외부 URL → Blob URL 변환 성공: ${imageUrl.substring(0, 60)}...`);
+    return blobUrl;
+    
+  } catch (error) {
+    console.warn(`[의상 감지] 외부 URL 변환 실패: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * 의상 감지 및 추출 (메인 함수)
  */
 export async function generateGarmentThumbnail(garmentType, category, originalImageUrl = null) {
   try {
     const prompt = generatePromptForGarment(garmentType, category);
     
-    // 1순위: 나노바나나 API (Gemini 3 우선)
-    try {
-      console.log(`[썸네일 생성] 나노바나나 API 시도: ${garmentType}/${category}`);
-      const result = await callNanoBananaAPI(prompt, originalImageUrl);
-      if (result) {
-        return result;
-      }
-    } catch (error) {
-      console.warn('[썸네일 생성] 나노바나나 실패, DALL-E 시도:', error.message);
+    // 원본 이미지가 없으면 감지 불가
+    if (!originalImageUrl) {
+      console.warn(`[의상 감지] 원본 이미지 없음: ${garmentType}/${category}`);
+      return null;
     }
-
-    // 2순위: DALL-E 3 API
-    if (window.OPENAI_API_KEY) {
-      try {
-        console.log(`[썸네일 생성] DALL-E 3 API 시도: ${garmentType}/${category}`);
-        const result = await callDALLEAPI(prompt);
-        if (result) {
+    
+    // 나노바나나 API로 의상 감지 시도 (로그 간소화)
+    try {
+      const result = await callNanoBananaAPI(prompt, originalImageUrl);
+      
+      // "NOT_FOUND" 또는 null이면 의상 없음
+      if (!result || result === 'NOT_FOUND' || (typeof result === 'string' && result.includes('NOT_FOUND'))) {
+        return null;
+      }
+      
+      // 🆕 외부 URL인 경우 즉시 Blob URL로 변환 (만료 방지)
+      if (result.startsWith('http://') || result.startsWith('https://')) {
+        const blobUrl = await convertExternalUrlToBlob(result);
+        if (blobUrl) {
+          return blobUrl; // Blob URL 반환
+        } else {
+          // 변환 실패 시 원본 URL 반환 (나중에 다시 시도 가능)
+          console.warn(`[의상 감지] 외부 URL 변환 실패, 원본 URL 유지: ${result.substring(0, 60)}...`);
           return result;
         }
-      } catch (error) {
-        console.warn('[썸네일 생성] DALL-E 실패:', error.message);
       }
+      
+      // data: URL 또는 blob: URL은 그대로 반환
+      return result;
+      
+    } catch (error) {
+      // 에러 로그 최소화 (NOT_FOUND는 정상 응답)
+      if (!error.message.includes('NOT_FOUND') && !error.message.includes('의상이 사진에 없습니다')) {
+        console.warn(`[의상 감지] ${garmentType}/${category} 실패: ${error.message}`);
+      }
+      return null;
     }
 
-    // 3순위: 더미 이미지
-    console.warn('[썸네일 생성] 모든 API 실패, 더미 이미지 사용');
-    return generateDummyThumbnail(garmentType, category);
-
   } catch (error) {
-    console.error('[썸네일 생성] 전체 실패:', error);
-    return generateDummyThumbnail(garmentType, category);
+    console.error(`[의상 감지] 오류 발생: ${garmentType}/${category}`, error);
+    return null;
   }
 }
 

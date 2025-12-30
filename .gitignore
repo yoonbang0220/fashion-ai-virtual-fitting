@@ -1,12 +1,12 @@
 # Node modules
 node_modules/
 
+# API Keys (중요!)
+config.js
+
 # Environment variables
 .env
 .env.local
-
-# API Keys (보안)
-config.js
 
 # OS files
 .DS_Store

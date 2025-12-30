@@ -132,6 +132,8 @@
       flex-direction: column;
       align-items: center;
       gap: 12px;
+      cursor: pointer;
+      pointer-events: auto;
     }
 
     .upload-icon-circle {
@@ -216,13 +218,14 @@
       -ms-overflow-style: none;
     }
     
-    /* 드래그 방해 요소 제거 */
-    .control-section * {
+    /* 드래그 방해 요소 제거 - 제목만 차단 */
+    .control-section .control-heading {
       pointer-events: none;
     }
     
     .control-section .slot-button {
-      pointer-events: auto;
+      pointer-events: auto !important;
+      cursor: pointer;
     }
     
     /* X 버튼은 반드시 클릭 가능하게 */
@@ -285,10 +288,15 @@
       pointer-events: none; /* 이미지는 클릭 차단, 슬롯만 클릭 가능 */
     }
 
+    .slot-button.empty {
+      cursor: pointer;
+    }
+
     .slot-button.empty::after {
       content: '+';
       font-size: 24px;
       color: #cbd5e1;
+      pointer-events: none;
     }
 
     /* X 버튼 (옷 제거용) */
@@ -554,32 +562,32 @@
       <div class="fitting-control-deck">
         <div class="control-buttons-container">
           <div class="control-section">
-            <div class="control-heading">Outer</div>
+            <div class="control-heading">Outer (레이어 6~7: 가장 바깥쪽)</div>
             <div class="control-buttons" id="outerSlots">
-              <!-- 아우터1: 헤비 아우터 (코트, 패딩 등) -->
-              <div class="slot-button empty" data-category="outer" data-index="0" title="헤비 아우터"></div>
-              <!-- 아우터2: 라이트 아우터 (블레이저, 재킷 등) -->
-              <div class="slot-button empty" data-category="outer" data-index="1" title="라이트 아우터"></div>
+              <!-- 아우터1: 헤비 아우터 (코트, 패딩 등) - 레이어 7 (가장 바깥쪽) -->
+              <div class="slot-button empty" data-category="outer" data-index="0" title="헤비 아우터 (레이어 7)"></div>
+              <!-- 아우터2: 라이트 아우터 (블레이저, 재킷 등) - 레이어 6 -->
+              <div class="slot-button empty" data-category="outer" data-index="1" title="라이트 아우터 (레이어 6)"></div>
             </div>
           </div>
           <div class="control-section">
-            <div class="control-heading">Inner</div>
+            <div class="control-heading">Inner (레이어 3~5: 중간층)</div>
             <div class="control-buttons" id="innerSlots">
-              <!-- 이너1: 미드 레이어 (가디건, 집업 등) -->
-              <div class="slot-button empty" data-category="inner" data-index="0" title="미드 레이어"></div>
-              <!-- 이너2: 메인 상의 (니트, 후드티, 조끼 등) -->
-              <div class="slot-button empty" data-category="inner" data-index="1" title="메인 상의"></div>
-              <!-- 이너3: 베이스 이너 (티셔츠, 셔츠 등) -->
-              <div class="slot-button empty" data-category="inner" data-index="2" title="베이스 이너"></div>
+              <!-- 이너1: 미드 레이어 (가디건, 집업 등) - 레이어 5 -->
+              <div class="slot-button empty" data-category="inner" data-index="0" title="미드 레이어 (레이어 5)"></div>
+              <!-- 이너2: 메인 상의 (니트, 후드티, 조끼 등) - 레이어 4 -->
+              <div class="slot-button empty" data-category="inner" data-index="1" title="메인 상의 (레이어 4)"></div>
+              <!-- 이너3: 베이스 이너 (티셔츠, 셔츠 등) - 레이어 3 -->
+              <div class="slot-button empty" data-category="inner" data-index="2" title="베이스 이너 (레이어 3)"></div>
             </div>
           </div>
           <div class="control-section">
-            <div class="control-heading">Bottoms</div>
+            <div class="control-heading">Bottoms (레이어 1~2: 가장 안쪽)</div>
             <div class="control-buttons" id="bottomsSlots">
-              <!-- 하의1 -->
-              <div class="slot-button empty" data-category="bottoms" data-index="0" title="하의"></div>
-              <!-- 하의2 -->
-              <div class="slot-button empty" data-category="bottoms" data-index="1" title="하의 2"></div>
+              <!-- 하의1 - 레이어 1 (가장 안쪽) -->
+              <div class="slot-button empty" data-category="bottoms" data-index="0" title="하의 (레이어 1)"></div>
+              <!-- 하의2 - 레이어 2 -->
+              <div class="slot-button empty" data-category="bottoms" data-index="1" title="하의 2 (레이어 2)"></div>
             </div>
           </div>
         </div>

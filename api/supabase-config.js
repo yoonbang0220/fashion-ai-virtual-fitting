@@ -213,7 +213,40 @@ async function imageUrlToBase64ForStorage(imageUrl, isThumbnail = false) {
 }
 
 /**
- * Base64를 Blob URL로 변환
+ * 이미지 URL이 실제로 유효한 이미지를 가리키는지 검증
+ */
+async function validateImageUrl(imageUrl) {
+  return new Promise((resolve) => {
+    if (!imageUrl) {
+      resolve(false);
+      return;
+    }
+    
+    const img = new Image();
+    const timeout = setTimeout(() => {
+      img.onload = null;
+      img.onerror = null;
+      resolve(false);
+    }, 3000); // 3초 타임아웃
+    
+    img.onload = () => {
+      clearTimeout(timeout);
+      // 이미지가 실제로 로드되었고 크기가 0이 아닌지 확인
+      const isValid = img.width > 0 && img.height > 0;
+      resolve(isValid);
+    };
+    
+    img.onerror = () => {
+      clearTimeout(timeout);
+      resolve(false);
+    };
+    
+    img.src = imageUrl;
+  });
+}
+
+/**
+ * Base64를 Blob URL로 변환 (유효성 검증 포함)
  */
 function base64ToImageUrl(base64) {
   try {
@@ -222,8 +255,43 @@ function base64ToImageUrl(base64) {
       return base64;
     }
     
-    const blob = new Blob([Uint8Array.from(atob(base64), c => c.charCodeAt(0))], { type: 'image/jpeg' });
-    return URL.createObjectURL(blob);
+    // Base64 디코딩 검증
+    if (!base64 || typeof base64 !== 'string' || base64.length < 100) {
+      console.error('[복원] Base64 변환 실패: 유효하지 않은 Base64 문자열 (너무 짧거나 없음)');
+      return null;
+    }
+    
+    // Base64 문자열 유효성 검증 (문자/숫자/+/= 만 허용)
+    if (!/^[A-Za-z0-9+/=]+$/.test(base64)) {
+      console.error('[복원] Base64 변환 실패: 잘못된 Base64 형식 (특수문자 포함)');
+      return null;
+    }
+    
+    let decodedData;
+    try {
+      decodedData = atob(base64);
+    } catch (decodeError) {
+      console.error('[복원] Base64 디코딩 실패:', decodeError.message);
+      return null;
+    }
+    
+    // 디코딩된 데이터 크기 검증 (최소 100바이트 이상이어야 이미지)
+    if (decodedData.length < 100) {
+      console.error('[복원] Base64 변환 실패: 디코딩된 데이터가 너무 작음 (이미지가 아님)');
+      return null;
+    }
+    
+    const blob = new Blob([Uint8Array.from(decodedData, c => c.charCodeAt(0))], { type: 'image/jpeg' });
+    const blobUrl = URL.createObjectURL(blob);
+    
+    // Blob 크기 검증 (최소 1KB 이상)
+    if (blob.size < 1024) {
+      console.error('[복원] Base64 변환 실패: Blob 크기가 너무 작음 (1KB 미만)');
+      URL.revokeObjectURL(blobUrl);
+      return null;
+    }
+    
+    return blobUrl;
   } catch (error) {
     console.error('[복원] Base64 변환 실패:', error);
     return null;
@@ -393,7 +461,7 @@ export async function loadState(sessionId) {
         console.log('   ✅ 파싱 성공');
         
         console.log('\n🔄 Base64 → Blob URL 변환 중...');
-        const restored = restoreImagesFromBase64(localState);
+        const restored = await restoreImagesFromBase64(localState);
         
         console.log('\n📊 로드된 상태 요약:');
         console.log('   - basePersonImageUrl:', restored.basePersonImageUrl ? 
@@ -439,7 +507,7 @@ export async function loadState(sessionId) {
           console.log(`   → 업데이트 시간: ${data.updated_at}`);
           
           console.log('\n🔄 Base64 → Blob URL 변환 중...');
-          const restored = restoreImagesFromBase64(data.state_data);
+          const restored = await restoreImagesFromBase64(data.state_data);
           
           console.log('\n📊 로드된 상태 요약:');
           console.log('   - basePersonImageUrl:', restored.basePersonImageUrl ? 'blob URL' : 'null');
@@ -603,30 +671,73 @@ async function convertImagesToBase64(state) {
 /**
  * Base64 이미지를 Blob URL로 복원
  */
-function restoreImagesFromBase64(state) {
+async function restoreImagesFromBase64(state) {
   const restored = JSON.parse(JSON.stringify(state));
   let restoreCount = 0;
   let restoreSuccess = 0;
   let restoreFailed = 0;
 
-  // basePersonImageUrl 복원
+  // basePersonImageUrl 복원 (가장 중요!)
   if (restored._basePersonImageIsBase64 && restored.basePersonImageUrl) {
     restoreCount++;
     console.log('   🔄 [1] basePersonImageUrl: Base64 → Blob URL 변환 중...');
     try {
       const base64SizeKB = (restored.basePersonImageUrl.length / 1024).toFixed(1);
-      restored.basePersonImageUrl = base64ToImageUrl(restored.basePersonImageUrl);
-      delete restored._basePersonImageIsBase64;
-      restoreSuccess++;
-      console.log(`      ✅ 복원 완료 (원본: ${base64SizeKB}KB → Blob URL)`);
+      const blobUrl = base64ToImageUrl(restored.basePersonImageUrl);
+      
+      if (!blobUrl) {
+        console.error(`      ❌ 복원 실패: Base64 → Blob URL 변환 실패 (손상된 데이터 가능성)`);
+        restored.basePersonImageUrl = null;
+        restoreFailed++;
+        delete restored._basePersonImageIsBase64;
+      } else {
+        // 🔍 추가 유효성 검증: 실제로 이미지를 로드할 수 있는지 테스트
+        const isValid = await validateImageUrl(blobUrl);
+        if (!isValid) {
+          console.error(`      ❌ 복원 실패: Blob URL이 유효한 이미지를 가리키지 않음 (손상된 이미지)`);
+          URL.revokeObjectURL(blobUrl);
+          restored.basePersonImageUrl = null;
+          restoreFailed++;
+        } else {
+          restored.basePersonImageUrl = blobUrl;
+          restoreSuccess++;
+          console.log(`      ✅ 복원 완료 (원본: ${base64SizeKB}KB → 유효한 Blob URL)`);
+        }
+        delete restored._basePersonImageIsBase64;
+      }
     } catch (error) {
-      console.warn(`      ❌ 복원 실패: ${error.message}`);
+      console.error(`      ❌ 복원 실패: ${error.message}`);
       restored.basePersonImageUrl = null;
       restoreFailed++;
+      delete restored._basePersonImageIsBase64;
     }
   } else if (restored.basePersonImageUrl && restored.basePersonImageUrl.startsWith('blob:')) {
     console.warn('   ⚠️ [1] basePersonImageUrl: 유효하지 않은 blob URL 감지, 제거함');
     restored.basePersonImageUrl = null;
+  } else if (restored.basePersonImageUrl && !restored.basePersonImageUrl.startsWith('data:')) {
+    // Base64 플래그가 없지만 값이 있는 경우 (이전 버전 호환성)
+    // Base64인지 확인 후 복원 시도
+    const isLikelyBase64 = restored.basePersonImageUrl.length > 100 && 
+                           /^[A-Za-z0-9+/=]+$/.test(restored.basePersonImageUrl);
+    if (isLikelyBase64) {
+      console.log('   🔄 [1] basePersonImageUrl: 플래그 없지만 Base64로 보임, 복원 시도...');
+      const blobUrl = base64ToImageUrl(restored.basePersonImageUrl);
+      if (blobUrl) {
+        const isValid = await validateImageUrl(blobUrl);
+        if (isValid) {
+          restored.basePersonImageUrl = blobUrl;
+          restoreSuccess++;
+          console.log(`      ✅ 복원 완료 (호환성 모드)`);
+        } else {
+          URL.revokeObjectURL(blobUrl);
+          restored.basePersonImageUrl = null;
+          console.error(`      ❌ 복원 실패: 유효하지 않은 이미지`);
+        }
+      } else {
+        restored.basePersonImageUrl = null;
+        console.error(`      ❌ 복원 실패: Base64 변환 실패`);
+      }
+    }
   }
 
   // composedImageUrl 복원

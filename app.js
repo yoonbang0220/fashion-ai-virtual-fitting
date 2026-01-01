@@ -209,15 +209,43 @@ async function runInlinePipeline(imageUrl, slots = null) {
     
     // 간단한 분석 진행 표시만
     const analysisResults = [];
-    for (const { type, index, category, garmentName, description } of categoriesToAnalyze) {
+    const totalCategories = categoriesToAnalyze.length;
+    
+    for (let i = 0; i < categoriesToAnalyze.length; i++) {
+      const { type, index, category, garmentName, description } = categoriesToAnalyze[i];
+      
+      // 분석 시작 시간 기록
+      const startTime = Date.now();
+      console.log(`[${i}/${totalCategories}] ${garmentName} 분석중...`);
+      
       // 🆕 구체적인 카테고리 전달
       const thumbnailUrl = await window.generateGarmentThumbnail(type, category, imageUrl);
       
-      if (thumbnailUrl && thumbnailUrl !== null) {
+      // 분석 완료 시간 계산
+      const endTime = Date.now();
+      const elapsedSeconds = ((endTime - startTime) / 1000).toFixed(1);
+      
+      // thumbnailUrl 체크: null, undefined, 빈 문자열, "NOT_FOUND" 문자열 모두 false로 처리
+      const isDetected = thumbnailUrl && 
+                         thumbnailUrl !== null && 
+                         thumbnailUrl !== undefined && 
+                         thumbnailUrl !== '' && 
+                         thumbnailUrl !== 'NOT_FOUND' &&
+                         !String(thumbnailUrl).includes('NOT_FOUND');
+      
+      if (isDetected) {
         appState.initialOutfitState[type][index] = thumbnailUrl;
         analysisResults.push({ type, index, garmentName, description, detected: true });
+        // 반환된 값 타입 확인 (디버깅용)
+        const urlType = thumbnailUrl.startsWith('blob:') ? 'blob URL' : 
+                       thumbnailUrl.startsWith('data:') ? 'data URL' : 
+                       thumbnailUrl.startsWith('http') ? 'HTTP URL' : '기타';
+        console.log(`[${i}/${totalCategories}] ${garmentName} 분석완료 (${elapsedSeconds}초) - ${urlType}`);
       } else {
         analysisResults.push({ type, index, garmentName, description, detected: false });
+        // 디버깅: 실제 반환값 확인
+        console.log(`[${i}/${totalCategories}] ${garmentName} 분석완료 (${elapsedSeconds}초) - 감지되지 않음`, 
+                   { thumbnailUrl: thumbnailUrl, type: typeof thumbnailUrl });
       }
     }
     
@@ -377,6 +405,38 @@ async function removeGarment(category, index) {
 }
 
 /**
+ * 이미지 URL 유효성 검증 함수 (전역)
+ */
+async function validateImageUrl(imageUrl) {
+  return new Promise((resolve) => {
+    if (!imageUrl) {
+      resolve(false);
+      return;
+    }
+    
+    const img = new Image();
+    const timeout = setTimeout(() => {
+      img.onload = null;
+      img.onerror = null;
+      resolve(false);
+    }, 5000); // 5초 타임아웃
+    
+    img.onload = () => {
+      clearTimeout(timeout);
+      const isValid = img.width > 0 && img.height > 0;
+      resolve(isValid);
+    };
+    
+    img.onerror = () => {
+      clearTimeout(timeout);
+      resolve(false);
+    };
+    
+    img.src = imageUrl;
+  });
+}
+
+/**
  * 가상 피팅 요청 - Base 이미지부터 모든 레이어를 순서대로 합성
  */
 async function requestTryOn(changedSlot) {
@@ -385,10 +445,21 @@ async function requestTryOn(changedSlot) {
     
     // ⚠️ 중요: Base 이미지부터 시작 (composedImage 사용 안 함)
     if (!appState.basePersonImageUrl) {
-      throw new Error('Base 이미지가 필요합니다');
+      throw new Error('Base 이미지가 필요합니다. 메인 사진을 다시 업로드해주세요.');
     }
     
-    console.log('[가상 피팅] Base 이미지 사용:', appState.basePersonImageUrl.substring(0, 50));
+    // 🔍 Base 이미지 유효성 검증
+    const baseImageUrl = appState.basePersonImageUrl;
+    console.log('[가상 피팅] Base 이미지 검증 중:', baseImageUrl.substring(0, 50));
+    
+    // 이미지가 실제로 로드 가능한지 검증
+    const isValidBaseImage = await validateImageUrl(baseImageUrl);
+    if (!isValidBaseImage) {
+      console.error('[가상 피팅] ❌ Base 이미지가 유효하지 않습니다. 손상되었거나 로드할 수 없는 이미지입니다.');
+      throw new Error('Base 이미지가 손상되었거나 로드할 수 없습니다. 메인 사진을 다시 업로드해주세요.');
+    }
+    
+    console.log('[가상 피팅] ✅ Base 이미지 유효성 검증 완료');
     
     // 🆕 URL 유효성 검사 함수
     function isValidImageUrl(url) {
@@ -477,8 +548,9 @@ async function requestTryOn(changedSlot) {
         }
       });
     });
-    
-    if (invalidUrls.length > 0) {
+  
+  // 🆕 유효하지 않은 URL 경고 및 감지
+  if (invalidUrls.length > 0) {
       console.warn('\n⚠️ ═══════════════════════════════════════════════════════════');
       console.warn('⚠️ 유효하지 않은 이미지 URL 감지');
       console.warn('⚠️ ═══════════════════════════════════════════════════════════');
@@ -596,9 +668,20 @@ async function generateVirtualTryOn(params) {
         }
       }
       
-      // 🆕 blob URL 또는 data URL이 아니면 fetch로 먼저 확인
-      if (!imageUrl.startsWith('blob:') && !imageUrl.startsWith('data:')) {
-        // 외부 URL인 경우 먼저 fetch로 확인
+      // 🔍 blob/data URL인 경우 먼저 유효성 검증
+      if (imageUrl.startsWith('blob:') || imageUrl.startsWith('data:')) {
+        validateImageUrl(imageUrl).then(isValid => {
+          if (!isValid) {
+            const urlType = imageUrl.startsWith('blob:') ? 'blob URL' : 'data URL';
+            return reject(new Error(`이미지를 로드할 수 없습니다 (${urlType}): 손상된 이미지 데이터일 수 있습니다.`));
+          }
+          // 유효성 검증 통과 후 이미지 로드
+          loadImage();
+        }).catch(err => {
+          return reject(new Error(`이미지 유효성 검증 실패: ${err.message}`));
+        });
+      } else {
+        // 외부 URL인 경우 fetch로 먼저 확인
         fetch(imageUrl, { method: 'HEAD', mode: 'no-cors' })
           .then(() => {
             // no-cors 모드에서는 response.ok를 확인할 수 없으므로 바로 이미지 로드 시도
@@ -616,9 +699,6 @@ async function generateVirtualTryOn(params) {
             console.log('[압축] CORS 문제 가능성, Image 객체로 직접 로드 시도');
             loadImage();
           });
-      } else {
-        // blob 또는 data URL은 바로 로드
-        loadImage();
       }
       
       function loadImage() {
